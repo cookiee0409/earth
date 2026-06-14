@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Neon Earth</title>
+  <meta name="description" content="보랏빛·파랏빛·초록빛 네온으로 빛나는, 돌리고 확대할 수 있는 인터랙티브 지구본" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <canvas id="globe" aria-label="네온빛으로 빛나는 회전하는 지구본. 드래그로 돌리고 휠로 확대·축소할 수 있습니다."></canvas>
+
+  <div id="controls">
+    <button id="zoom-in" aria-label="확대" title="확대 (+)">+</button>
+    <button id="zoom-out" aria-label="축소" title="축소 (−)">−</button>
+    <button id="reset" aria-label="초기화" title="초기 위치로">⟳</button>
+  </div>
+
+  <div id="hint">드래그로 돌리기 · 휠 또는 ± 버튼으로 확대·축소</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
+  <script src="globe.js"></script>
+</body>
+</html>

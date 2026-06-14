@@ -1,0 +1,11 @@
+{
+  "name": "neon-earth",
+  "version": "1.0.0",
+  "description": "보랏빛·파랏빛·초록빛 네온으로 빛나는, 돌리고 확대할 수 있는 인터랙티브 지구본",
+  "private": true,
+  "scripts": {
+    "dev": "npx serve .",
+    "start": "npx serve ."
+  },
+  "license": "MIT"
+}
