@@ -10,10 +10,16 @@
   const MIN_K = 0.55, MAX_K = 7; // zoom multipliers relative to baseScale
 
   // Orthographic projection — a true globe view.
-  const projection = d3.geoOrthographic().clipAngle(90).precision(0.3);
+  const projection = d3.geoOrthographic().clipAngle(90).precision(0.5);
   const path = d3.geoPath(projection, ctx);
   const graticule = d3.geoGraticule10();
   const sphere = { type: "Sphere" };
+
+  // Offscreen layer for land — drawn once per frame, then blurred for the
+  // neon bloom in a single raster pass (far cheaper than per-path shadowBlur).
+  const layer = document.createElement("canvas");
+  const lctx = layer.getContext("2d");
+  const lpath = d3.geoPath(projection, lctx);
 
   let land = null;          // GeoJSON of all land
   let rotation = [0, -12, 0]; // [λ, φ, γ]
@@ -38,7 +44,7 @@
   }
 
   function resize() {
-    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    dpr = Math.min(window.devicePixelRatio || 1, 1.5);
     width = window.innerWidth;
     height = window.innerHeight;
     canvas.width = Math.floor(width * dpr);
@@ -47,9 +53,13 @@
     canvas.style.height = height + "px";
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
+    layer.width = canvas.width;
+    layer.height = canvas.height;
+    lctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
     cx = width / 2;
     cy = height / 2;
-    const fit = Math.min(width, height) / 2 - 18;
+    const fit = Math.max(20, Math.min(width, height) / 2 - 18);
     const k = baseScale ? scale / baseScale : 1; // preserve zoom level
     baseScale = fit;
     scale = baseScale * (baseScale ? k : 1);
@@ -131,48 +141,48 @@
 
   function drawLand() {
     if (!land) return;
-    const glow = Math.max(10, scale * 0.06);
 
-    // Pass 1 — broad neon bloom.
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    ctx.shadowColor = "#00ffa3";
-    ctx.shadowBlur = glow * 2;
-    ctx.beginPath();
-    path(land);
-    ctx.fillStyle = "rgba(0, 255, 150, 0.45)";
-    ctx.fill();
-    ctx.restore();
+    // Draw land once onto the offscreen layer — solid body + bright coastline,
+    // no per-path shadow (which is what made it crawl).
+    lctx.clearRect(0, 0, width, height);
 
-    // Pass 2 — solid fluorescent body with a purple→green sheen.
-    const sheen = ctx.createLinearGradient(cx - scale, cy - scale, cx + scale, cy + scale);
+    const sheen = lctx.createLinearGradient(cx - scale, cy - scale, cx + scale, cy + scale);
     sheen.addColorStop(0, "#13e58a");
     sheen.addColorStop(0.5, "#0fd6a6");
     sheen.addColorStop(1, "#2fb6ff");
-    ctx.beginPath();
-    path(land);
-    ctx.fillStyle = sheen;
-    ctx.fill();
+    lctx.beginPath();
+    lpath(land);
+    lctx.fillStyle = sheen;
+    lctx.fill();
 
-    // Pass 3 — bright neon coastline.
+    lctx.beginPath();
+    lpath(land);
+    lctx.lineWidth = Math.max(0.6, scale * 0.0018);
+    lctx.strokeStyle = "rgba(170, 255, 225, 0.95)";
+    lctx.stroke();
+
+    // Bloom: composite a blurred copy with additive blending (one raster blur),
+    // then the sharp copy on top.
+    const blur = Math.max(4, scale * 0.018);
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
-    ctx.shadowColor = "#7dffd1";
-    ctx.shadowBlur = glow;
-    ctx.lineWidth = Math.max(0.6, scale * 0.0018);
-    ctx.strokeStyle = "rgba(150, 255, 215, 0.9)";
-    ctx.beginPath();
-    path(land);
-    ctx.stroke();
+    if ("filter" in ctx) {
+      ctx.filter = "blur(" + blur.toFixed(1) + "px)";
+      ctx.globalAlpha = 0.85;
+      ctx.drawImage(layer, 0, 0, width, height);
+      ctx.filter = "none";
+    }
+    ctx.globalAlpha = 1;
+    ctx.drawImage(layer, 0, 0, width, height);
     ctx.restore();
   }
 
   function drawRim() {
-    // Thin glowing edge of the planet.
+    // Thin glowing edge of the planet (single arc — cheap shadow).
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
     ctx.shadowColor = "#5a8cff";
-    ctx.shadowBlur = 24;
+    ctx.shadowBlur = 18;
     ctx.lineWidth = 1.4;
     ctx.strokeStyle = "rgba(140, 170, 255, 0.7)";
     ctx.beginPath();
@@ -299,7 +309,7 @@
   lastSpin = performance.now();
   requestAnimationFrame(frame);
 
-  fetch("land-50m.json")
+  fetch("land-110m.json")
     .then((r) => r.json())
     .then((topo) => {
       land = topojson.feature(topo, topo.objects.land);

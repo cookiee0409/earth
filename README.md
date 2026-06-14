@@ -14,7 +14,7 @@
 - 순수 HTML / CSS / Canvas 2D
 - [d3-geo](https://github.com/d3/d3-geo) — 정사영 투영 및 경로 생성
 - [topojson-client](https://github.com/topojson/topojson-client) — 대륙 데이터 디코딩
-- 대륙 데이터: [world-atlas](https://github.com/topojson/world-atlas) `land-50m` (저장소에 포함)
+- 대륙 데이터: [world-atlas](https://github.com/topojson/world-atlas) `land-110m` (저장소에 포함, 가벼우면서 대륙 식별 가능)
 
 빌드 단계가 없는 정적 사이트입니다.
 
