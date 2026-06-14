@@ -22,6 +22,7 @@
   const lpath = d3.geoPath(projection, lctx);
 
   let land = null;          // GeoJSON of all land
+  let borders = null;       // mesh of interior country borders
   let rotation = [0, -12, 0]; // [λ, φ, γ]
   let autoSpin = true;
   let lastSpin = performance.now();
@@ -160,6 +161,15 @@
     lctx.lineWidth = Math.max(0.6, scale * 0.0018);
     lctx.strokeStyle = "rgba(170, 255, 225, 0.95)";
     lctx.stroke();
+
+    // Country borders — thin fluorescent purple neon lines.
+    if (borders) {
+      lctx.beginPath();
+      lpath(borders);
+      lctx.lineWidth = Math.max(0.7, scale * 0.0014);
+      lctx.strokeStyle = "rgba(206, 138, 255, 0.95)";
+      lctx.stroke();
+    }
 
     // Bloom: composite a blurred copy with additive blending (one raster blur),
     // then the sharp copy on top.
@@ -309,12 +319,14 @@
   lastSpin = performance.now();
   requestAnimationFrame(frame);
 
-  fetch("land-110m.json")
+  fetch("countries-110m.json")
     .then((r) => r.json())
     .then((topo) => {
       land = topojson.feature(topo, topo.objects.land);
+      // Interior borders only (shared edges), so coastlines aren't doubled.
+      borders = topojson.mesh(topo, topo.objects.countries, (a, b) => a !== b);
     })
     .catch((err) => {
-      console.error("Failed to load land data:", err);
+      console.error("Failed to load map data:", err);
     });
 })();
