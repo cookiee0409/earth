@@ -35,7 +35,7 @@
   let cumW = [], totalW = 0;
   let daily = null;         // { start, counts:[...] }
   let dayIndex = 0, maxCount = 1;
-  let playing = false, playAccum = 0;
+  let paused = false, playAccum = 0; // paused freezes planes, spin, and time
   let planes = [];
   let maxPlanes = 420;      // plane cap (scales with screen size)
   const SPEED_K = 0.0011;   // angular speed = K / route-length (constant ground speed)
@@ -240,7 +240,6 @@
     if (elBar) elBar.classList.toggle("liveon", on);
     if (elDatePick) elDatePick.disabled = on;
     if (on) {
-      playing = false; elPlay.textContent = "▶";
       if (elModeled) { elModeled.textContent = "실측"; elModeled.title = "adsb.lol 실시간 측정 데이터 (ADS-B)"; }
       elCount.textContent = "불러오는 중…";
       fetchLive();
@@ -278,8 +277,7 @@
     // Trails first, then plane glyphs on top — both colored by departure continent.
     ctx.lineWidth = 1;
     for (const pl of planes) {
-      pl.t += pl.sp;
-      if (pl.t >= 1) { respawn(pl); continue; }
+      if (!paused) { pl.t += pl.sp; if (pl.t >= 1) { respawn(pl); continue; } }
       const r = routes[pl.ri];
       if (hidden(r.cont, r.country)) continue;
       const head = r.interp(pl.t);
@@ -330,7 +328,7 @@
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
     for (const pl of livePlanes) {
-      if (pl.vel > 0) { const np = destination(pl.lon, pl.lat, pl.track, pl.vel * secs); pl.lon = np[0]; pl.lat = np[1]; }
+      if (pl.vel > 0 && !paused) { const np = destination(pl.lon, pl.lat, pl.track, pl.vel * secs); pl.lon = np[0]; pl.lat = np[1]; }
       if (hidden(pl.cont, pl.country)) continue;
       const pos = [pl.lon, pl.lat];
       if (d3.geoDistance(pos, center) > horizon) continue;
@@ -547,16 +545,17 @@
     const dt = t - lastFrame;
     lastFrame = t;
     frameDt = dt;
-    if (autoSpin) {
+    if (autoSpin && !paused) {
       rotation[0] = (rotation[0] + (t - lastSpin) * 0.006) % 360; // ~6°/s
     }
     lastSpin = t;
-    if (playing && daily) {
+    if (!paused && !liveMode && daily) {
       playAccum += dt;
       const msPerDay = BASE_MS_PER_DAY / speed;
       while (playAccum >= msPerDay) {
         playAccum -= msPerDay;
-        setDay(dayIndex + 1 >= daily.counts.length ? 0 : dayIndex + 1);
+        if (dayIndex + 1 >= daily.counts.length) { playAccum = 0; break; } // reached today — hold
+        setDay(dayIndex + 1);
       }
     }
     try {
@@ -648,9 +647,9 @@
 
   elSlider.addEventListener("input", () => { if (liveMode) return; setDay(+elSlider.value); });
   elPlay.addEventListener("click", () => {
-    if (liveMode) return;
-    playing = !playing;
-    elPlay.textContent = playing ? "❚❚" : "▶";
+    paused = !paused;
+    elPlay.textContent = paused ? "▶" : "❚❚";
+    elPlay.title = paused ? "재생 (비행기·자전 재개)" : "일시정지 (화면 멈춤)";
   });
   if (elLive) elLive.addEventListener("click", () => setLiveMode(!liveMode));
 
@@ -739,7 +738,7 @@
   lastSpin = performance.now();
   requestAnimationFrame(frame);
 
-  fetch("countries-110m.json")
+  fetch("countries-110m.json?v=3")
     .then((r) => r.json())
     .then((topo) => {
       land = topojson.feature(topo, topo.objects.land);
@@ -753,12 +752,12 @@
       console.error("Failed to load map data:", err);
     });
 
-  fetch("routes.json")
+  fetch("routes.json?v=3")
     .then((r) => r.json())
     .then((d) => { buildRoutes(d); buildLegend(); if (daily) setDay(dayIndex); })
     .catch((err) => { console.error("Failed to load routes:", err); });
 
-  fetch("daily.json")
+  fetch("daily.json?v=3")
     .then((r) => r.json())
     .then((d) => {
       daily = d;
