@@ -98,6 +98,7 @@
   let shown = [];            // route indices (within activeN) passing the filter
   let countryFeatures = null, countryBounds = null; // for live point-in-country
   const LINE_CAP = 450;      // draw route arcs only when shown count is manageable
+  let wP80 = 0, wP95 = 0;    // weight percentiles → route line thickness/brightness tiers
 
   let speed = 1;             // playback speed multiplier
   const BASE_MS_PER_DAY = 5000; // 1× = one day per 5 seconds
@@ -179,9 +180,13 @@
         oCont: oa.cont, dCont: da.cont, oCountry: oa.cty, dCountry: da.cty,
       };
     });
+    const ws = routes.map((r) => r.w).sort((a, b) => a - b);
+    wP80 = ws[Math.floor(ws.length * 0.8)] || 0;
+    wP95 = ws[Math.floor(ws.length * 0.95)] || 0;
     buildTrees();
     computeCaps();
     rebuildShown();
+    buildSummary();
   }
 
   function buildTrees() {
@@ -241,6 +246,7 @@
   function applyFilter() {
     rebuildShown();
     computeMarks();
+    buildSummary();
     if (daily && !liveMode) setPlaneCount(Math.round((daily.counts[dayIndex] / maxCount) * maxPlanes));
     hideRoutePopup();
   }
@@ -258,6 +264,68 @@
   const elLive = document.getElementById("live");
   const elModeled = document.getElementById("romodeled");
   const elBar = document.getElementById("flightbar");
+  const elSummary = document.getElementById("summary");
+  const elSumTitle = document.getElementById("sum-title");
+  const elSumBody = document.getElementById("sum-body");
+
+  // ---- filter summary panel ----------------------------------------------
+  function fmtNames(set) {
+    const a = [...set];
+    if (!a.length) return "";
+    if (a.length === 1) return koName(a[0]);
+    return koName(a[0]) + " 외 " + (a.length - 1) + "개국";
+  }
+  function topByWeight(map, n) {
+    return [...map.entries()].sort((x, y) => y[1] - x[1]).slice(0, n);
+  }
+
+  function buildSummary() {
+    if (!elSummary) return;
+    if (liveMode || !routes.length) { elSummary.hidden = true; return; }
+    const hasDep = depSel.size > 0, hasArr = arrSel.size > 0;
+    const destC = new Map(), origC = new Map(), origA = new Map(), destA = new Map();
+    for (const ri of shown) {
+      const r = routes[ri];
+      if (r.dCountry) destC.set(r.dCountry, (destC.get(r.dCountry) || 0) + r.w);
+      if (r.oCountry) origC.set(r.oCountry, (origC.get(r.oCountry) || 0) + r.w);
+      const oa = r.oAir.iata || r.oAir.name, da = r.dAir.iata || r.dAir.name;
+      origA.set(oa, (origA.get(oa) || 0) + r.w);
+      destA.set(da, (destA.get(da) || 0) + r.w);
+    }
+    const topRoutes = shown.map((ri) => routes[ri]).sort((a, b) => b.w - a.w).slice(0, 3)
+      .map((r) => (r.oAir.iata || r.oAir.name) + " → " + (r.dAir.iata || r.dAir.name));
+    const dash = (s) => s || "-";
+
+    let title;
+    const rows = [["표시 노선", shown.length.toLocaleString("ko-KR") + "개"]];
+    if (hasDep && hasArr) {
+      title = fmtNames(depSel) + " → " + fmtNames(arrSel) + " 항공 흐름";
+      rows.push(["주요 노선", dash(topRoutes.join(", "))]);
+      let depTotal = 0;
+      for (let i = 0; i < activeN; i++) if (depSel.has(routes[i].oCountry)) depTotal++;
+      const pct = depTotal ? Math.round((shown.length / depTotal) * 100) : 0;
+      rows.push(["전체 대비", fmtNames(depSel) + " 출발 노선 중 약 " + pct + "%"]);
+    } else if (hasDep) {
+      title = fmtNames(depSel) + " 출발 항공 흐름";
+      rows.push(["주요 도착국", dash(topByWeight(destC, 5).map((e) => koName(e[0])).join(", "))]);
+      rows.push(["주요 출발 공항", dash(topByWeight(origA, 4).map((e) => e[0]).join(", "))]);
+      rows.push(["가장 강한 노선", dash(topRoutes.join(", "))]);
+    } else if (hasArr) {
+      title = fmtNames(arrSel) + " 도착 항공 흐름";
+      rows.push(["주요 출발국", dash(topByWeight(origC, 5).map((e) => koName(e[0])).join(", "))]);
+      rows.push(["주요 도착 공항", dash(topByWeight(destA, 4).map((e) => e[0]).join(", "))]);
+      rows.push(["가장 강한 노선", dash(topRoutes.join(", "))]);
+    } else {
+      title = "전체 항공 흐름";
+      rows.push(["주요 출발국", dash(topByWeight(origC, 5).map((e) => koName(e[0])).join(", "))]);
+      rows.push(["가장 강한 노선", dash(topRoutes.join(", "))]);
+    }
+    elSumTitle.textContent = title;
+    elSumBody.innerHTML = rows.map((r) =>
+      '<div class="sum-row"><span class="sum-k">' + r[0] + '</span><span class="sum-v">' + r[1] + "</span></div>"
+    ).join("");
+    elSummary.hidden = false;
+  }
 
   function setDay(idx) {
     if (!daily) return;
@@ -335,12 +403,16 @@
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
 
-    // Persistent route arcs — thicker, faint, colored by departure country.
+    // Persistent route arcs — width + brightness scale with traffic weight.
     if (shown.length && shown.length <= LINE_CAP) {
-      ctx.lineWidth = 2.1;
       for (const ri of shown) {
         const r = routes[ri];
-        ctx.strokeStyle = cssRGBA(rgbOf(r.oCountry, r.oCont), 0.2);
+        let lw, al;
+        if (r.w >= wP95) { lw = 3.6; al = 0.6; }        // top ~5%: bright + thick
+        else if (r.w >= wP80) { lw = 2.1; al = 0.34; }  // top ~20%: medium
+        else { lw = 1.1; al = 0.15; }                   // rest: thin + faint
+        ctx.lineWidth = lw;
+        ctx.strokeStyle = cssRGBA(rgbOf(r.oCountry, r.oCont), al);
         ctx.beginPath();
         let started = false;
         for (let i = 0; i < r.lineCoords.length; i++) {
@@ -497,6 +569,7 @@
     if (routes.length) {
       computeCaps();
       rebuildShown();
+      buildSummary();
       if (daily && !liveMode) setDay(dayIndex); // re-evaluate plane count for new cap
     }
   }

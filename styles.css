@@ -286,6 +286,28 @@ html, body {
 .cp-air { font-size: 11px; color: rgba(170, 190, 255, 0.7); line-height: 1.5; padding: 2px 0 4px 30px; }
 .cp-foot { margin-top: 8px; font-size: 11px; color: rgba(170, 190, 255, 0.55); line-height: 1.4; }
 
+#summary {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 11;
+  width: min(360px, calc(100vw - 32px));
+  padding: 11px 15px;
+  border-radius: 13px;
+  border: 1px solid rgba(120, 160, 255, 0.32);
+  background: rgba(14, 12, 34, 0.78);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 0 22px rgba(80, 120, 255, 0.2);
+  color: #cfe3ff;
+}
+#summary[hidden] { display: none; }
+#sum-title { font-size: 14px; font-weight: 500; color: #8ffcff; text-shadow: 0 0 12px rgba(93, 249, 255, 0.4); margin-bottom: 7px; }
+#sum-body { display: flex; flex-direction: column; gap: 4px; }
+.sum-row { display: flex; gap: 10px; font-size: 12px; line-height: 1.4; }
+.sum-k { flex: 0 0 78px; color: rgba(170, 190, 255, 0.7); }
+.sum-v { flex: 1 1 auto; color: #dfe9ff; }
+
 #routepop {
   position: fixed;
   top: 18px;
@@ -320,5 +342,7 @@ html, body {
   #speeds button { width: 28px; height: 28px; font-size: 10px; }
   #speednote { display: none; }
   #rocount { font-size: 11px; }
-  #routepop { top: 10px; right: 10px; max-width: calc(100vw - 20px); }
+  #summary { top: 8px; width: calc(100vw - 20px); padding: 9px 12px; }
+  #sum-row, .sum-row { font-size: 11px; }
+  #routepop { top: auto; bottom: 90px; right: 10px; max-width: calc(100vw - 20px); }
 }
