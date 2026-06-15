@@ -56,6 +56,7 @@
   const CONT_NAME = ["아시아", "유럽", "아프리카", "북미", "남미", "오세아니아", "기타"];
   const CONT_FILL = CONT_RGB.map((c) => `rgb(${c[0]},${c[1]},${c[2]})`);
   const CONT_TRAIL = CONT_RGB.map((c) => `rgba(${c[0]},${c[1]},${c[2]},0.34)`);
+  const CONT_LINE = CONT_RGB.map((c) => `rgba(${c[0]},${c[1]},${c[2]},0.4)`);
 
   function continentOf(lon, lat) {
     if (lat < -60) return 6;
@@ -70,15 +71,26 @@
     return 6;
   }
 
-  // ---- filters & metadata -------------------------------------------------
-  let routeCountries = [];   // index -> country name (from routes.json)
-  let byCont = {};           // continent index -> [country index, ...]
-  const contOff = new Set(); // disabled continents
-  const countryOff = new Set(); // disabled country names
+  // ---- routes, airports, departure/arrival filters ------------------------
+  let countries = [];        // index -> country name
+  let airports = [];         // index -> {iata,name,cty,cont,lon,lat}
+  const depSel = new Set();  // selected DEPARTURE country names
+  const arrSel = new Set();  // selected ARRIVAL country names
+  let depTree = {};          // contIdx -> Map(country -> Set(airportIdx))  origins
+  let arrTree = {};          // contIdx -> Map(country -> Set(airportIdx))  destinations
+  let shown = [];            // route indices (within activeN) passing the filter
   let countryFeatures = null, countryBounds = null; // for live point-in-country
+  const LINE_CAP = 450;      // draw route arcs only when shown count is manageable
 
   let speed = 1;             // playback speed multiplier
   const BASE_MS_PER_DAY = 700; // slow by default (1×)
+
+  // Departure ∩ arrival rule (both empty = no filter = show all):
+  function routeShown(r) {
+    const depOk = depSel.size === 0 || depSel.has(r.oCountry);
+    const arrOk = arrSel.size === 0 || arrSel.has(r.dCountry);
+    return depOk && arrOk;
+  }
 
   // Korean labels for the countries that appear in the panels.
   const KO = {
@@ -101,12 +113,6 @@
     "Australia": "호주", "New Zealand": "뉴질랜드", "Fiji": "피지", "Papua New Guinea": "파푸아뉴기니",
   };
   const koName = (n) => KO[n] || n;
-
-  function hidden(cont, country) {
-    if (contOff.has(cont)) return true;
-    if (country && countryOff.has(country)) return true;
-    return false;
-  }
 
   // Point-in-country for live aircraft (countries-110m), with a bbox prefilter.
   function countryOfLive(lon, lat) {
@@ -132,43 +138,73 @@
     ctx.fill();
   }
 
+  function sampleArc(interp) {
+    const n = 22, a = [];
+    for (let i = 0; i <= n; i++) a.push(interp(i / n));
+    return a;
+  }
+
   function buildRoutes(data) {
-    routeCountries = data.countries || [];
-    byCont = data.byCont || {};
+    countries = data.countries || [];
+    airports = (data.airports || []).map((a) => ({
+      iata: a[0], name: a[1], cty: a[2] >= 0 ? countries[a[2]] : null, cont: a[3], lon: a[4], lat: a[5],
+    }));
     routes = data.routes.map((a) => {
-      const o = [a[0], a[1]], d = [a[2], a[3]];
+      const oi = a[1], di = a[2];
+      const oa = airports[oi], da = airports[di];
+      const o = [oa.lon, oa.lat], d = [da.lon, da.lat];
+      const interp = d3.geoInterpolate(o, d);
       return {
-        o, d, w: a[4],
-        interp: d3.geoInterpolate(o, d),
+        o, d, w: a[0], interp,
+        lineCoords: sampleArc(interp),
         dist: Math.max(0.02, d3.geoDistance(o, d)),
-        cont: a[5] != null ? a[5] : continentOf(a[0], a[1]),
-        country: (a[6] != null && a[6] >= 0) ? routeCountries[a[6]] : null,
+        oAirIdx: oi, dAirIdx: di, oAir: oa, dAir: da,
+        oCont: oa.cont, dCont: da.cont, oCountry: oa.cty, dCountry: da.cty,
       };
     });
+    buildTrees();
     computeCaps();
-    rebuildActive();
+    rebuildShown();
+  }
+
+  function buildTrees() {
+    depTree = {}; arrTree = {};
+    const add = (tree, cont, cty, ai) => {
+      if (cty == null) return;
+      (tree[cont] = tree[cont] || new Map());
+      if (!tree[cont].has(cty)) tree[cont].set(cty, new Set());
+      tree[cont].get(cty).add(ai);
+    };
+    for (const r of routes) {
+      add(depTree, r.oCont, r.oCountry, r.oAirIdx);
+      add(arrTree, r.dCont, r.dCountry, r.dAirIdx);
+    }
   }
 
   // Scale route count and plane cap to the viewport (1280×720 ≈ baseline).
   function computeCaps() {
     const f = (width * height) / 921600;
     maxPlanes = Math.round(Math.max(90, Math.min(560, 420 * f)));
-    activeN = Math.round(Math.max(350, Math.min(routes.length || 1600, 1600 * f)));
+    activeN = Math.round(Math.max(400, Math.min(routes.length || 1700, 1700 * f)));
     if (routes.length) activeN = Math.min(activeN, routes.length);
   }
 
-  function rebuildActive() {
+  // Recompute the visible route set (filtered) and reassign planes onto it.
+  function rebuildShown() {
     if (!routes.length) return;
-    cumW = []; totalW = 0;
-    for (let i = 0; i < activeN; i++) { totalW += routes[i].w; cumW.push(totalW); }
-    for (const pl of planes) if (pl.ri >= activeN) respawn(pl);
+    shown = []; cumW = []; totalW = 0;
+    for (let i = 0; i < activeN; i++) {
+      if (routeShown(routes[i])) { shown.push(i); totalW += routes[i].w; cumW.push(totalW); }
+    }
+    if (!shown.length) { planes.length = 0; return; }
+    for (const pl of planes) respawn(pl);
   }
 
-  function weightedPick() {
+  function weightedPick() { // -> a route index drawn from `shown`, weighted
     const x = Math.random() * totalW;
     let lo = 0, hi = cumW.length - 1;
     while (lo < hi) { const m = (lo + hi) >> 1; if (cumW[m] < x) lo = m + 1; else hi = m; }
-    return lo;
+    return shown[lo];
   }
 
   function respawn(pl) {
@@ -178,10 +214,17 @@
   }
 
   function setPlaneCount(n) {
-    if (!routes.length) return;
+    if (!routes.length || !shown.length) { planes.length = 0; return; }
     n = Math.max(0, Math.min(maxPlanes, n));
     while (planes.length < n) { const pl = {}; respawn(pl); pl.t = Math.random(); planes.push(pl); }
     if (planes.length > n) planes.length = n;
+  }
+
+  // Recompute filter + plane count after a selection change.
+  function applyFilter() {
+    rebuildShown();
+    if (daily && !liveMode) setPlaneCount(Math.round((daily.counts[dayIndex] / maxCount) * maxPlanes));
+    hideRoutePopup();
   }
 
   function fmtISO(idx) {
@@ -265,7 +308,7 @@
 
   function drawFlights(dt) {
     if (liveMode) return drawLive(dt);
-    if (!routes.length || !planes.length) return;
+    if (!routes.length) return;
     const rot = projection.rotate();
     const center = [-rot[0], -rot[1]];
     const horizon = Math.PI / 2 - 0.02;
@@ -274,15 +317,32 @@
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
 
-    // Trails first, then plane glyphs on top — both colored by departure continent.
+    // Persistent route arcs (great-circle paths), colored by departure continent.
+    if (shown.length && shown.length <= LINE_CAP) {
+      ctx.lineWidth = 0.7;
+      for (const ri of shown) {
+        const r = routes[ri];
+        ctx.strokeStyle = CONT_LINE[r.oCont];
+        ctx.beginPath();
+        let started = false;
+        for (let i = 0; i < r.lineCoords.length; i++) {
+          if (d3.geoDistance(r.lineCoords[i], center) > horizon) { started = false; continue; }
+          const pp = projection(r.lineCoords[i]);
+          if (started) ctx.lineTo(pp[0], pp[1]);
+          else { ctx.moveTo(pp[0], pp[1]); started = true; }
+        }
+        ctx.stroke();
+      }
+    }
+
+    // Plane trails then glyphs (planes already live only on shown routes).
     ctx.lineWidth = 1;
     for (const pl of planes) {
       if (!paused) { pl.t += pl.sp; if (pl.t >= 1) { respawn(pl); continue; } }
       const r = routes[pl.ri];
-      if (hidden(r.cont, r.country)) continue;
       const head = r.interp(pl.t);
       if (d3.geoDistance(head, center) > horizon) continue;
-      ctx.strokeStyle = CONT_TRAIL[r.cont];
+      ctx.strokeStyle = CONT_TRAIL[r.oCont];
       const steps = 6, back = 0.09;
       ctx.beginPath();
       let started = false;
@@ -300,13 +360,12 @@
 
     for (const pl of planes) {
       const r = routes[pl.ri];
-      if (hidden(r.cont, r.country)) continue;
       const head = r.interp(pl.t);
       if (d3.geoDistance(head, center) > horizon) continue;
       const p0 = projection(head);
       const pa = projection(r.interp(Math.min(1, pl.t + 0.012)));
       const ang = Math.atan2(pa[1] - p0[1], pa[0] - p0[0]);
-      ctx.fillStyle = CONT_FILL[r.cont];
+      ctx.fillStyle = CONT_FILL[r.oCont];
       ctx.save();
       ctx.translate(p0[0], p0[1]);
       ctx.rotate(ang);
@@ -315,6 +374,11 @@
       ctx.restore();
     }
     ctx.restore();
+  }
+
+  function liveShown(pl) {
+    if (depSel.size === 0 && arrSel.size === 0) return true;
+    return depSel.has(pl.country) || arrSel.has(pl.country);
   }
 
   function drawLive(dt) {
@@ -329,7 +393,7 @@
     ctx.globalCompositeOperation = "lighter";
     for (const pl of livePlanes) {
       if (pl.vel > 0 && !paused) { const np = destination(pl.lon, pl.lat, pl.track, pl.vel * secs); pl.lon = np[0]; pl.lat = np[1]; }
-      if (hidden(pl.cont, pl.country)) continue;
+      if (!liveShown(pl)) continue;
       const pos = [pl.lon, pl.lat];
       if (d3.geoDistance(pos, center) > horizon) continue;
       const p0 = projection(pos);
@@ -390,7 +454,7 @@
 
     if (routes.length) {
       computeCaps();
-      rebuildActive();
+      rebuildShown();
       if (daily && !liveMode) setDay(dayIndex); // re-evaluate plane count for new cap
     }
   }
@@ -569,7 +633,7 @@
   // ---- interaction --------------------------------------------------------
 
   let dragging = false;
-  let lastX = 0, lastY = 0;
+  let lastX = 0, lastY = 0, downX = 0, downY = 0;
   let spinResume = null;
 
   function pointerDown(e) {
@@ -578,6 +642,8 @@
     if (spinResume) clearTimeout(spinResume);
     lastX = e.clientX;
     lastY = e.clientY;
+    downX = e.clientX;
+    downY = e.clientY;
     canvas.setPointerCapture(e.pointerId);
   }
 
@@ -597,6 +663,10 @@
     dragging = false;
     try { canvas.releasePointerCapture(e.pointerId); } catch (_) {}
     spinResume = setTimeout(() => { autoSpin = true; lastSpin = performance.now(); }, 1600);
+    // A tap (no real drag, single pointer) tries to select a route line.
+    if (active.size === 0 && Math.hypot(e.clientX - downX, e.clientY - downY) < 5) {
+      routeClick(e.clientX, e.clientY);
+    }
   }
 
   function zoomBy(factor) {
@@ -669,62 +739,152 @@
     });
   });
 
-  // Continent legend + country panel.
+  // ---- departure / arrival filter UI -------------------------------------
   const LEGEND_ORDER = [3, 4, 1, 2, 0, 5];
-  function buildLegend() {
-    const host = document.getElementById("legend-items");
+  let curPanel = null; // { mode, cont }
+
+  function treeOf(mode) { return mode === "dep" ? depTree : arrTree; }
+  function selOf(mode) { return mode === "dep" ? depSel : arrSel; }
+  function countriesOf(mode, cont) {
+    const m = treeOf(mode)[cont];
+    return m ? [...m.keys()].sort((a, b) => koName(a).localeCompare(koName(b), "ko")) : [];
+  }
+
+  function buildLegends() {
+    buildLegend("dep", document.getElementById("dep-items"));
+    buildLegend("arr", document.getElementById("arr-items"));
+  }
+
+  function buildLegend(mode, host) {
     if (!host) return;
     host.innerHTML = "";
+    const sel = selOf(mode);
     for (const c of LEGEND_ORDER) {
+      const cties = countriesOf(mode, c);
+      if (!cties.length) continue;
       const item = document.createElement("div");
       item.className = "lg-item";
+      if (curPanel && curPanel.mode === mode && curPanel.cont === c) item.classList.add("active");
       item.innerHTML = '<i style="background:' + CONT_FILL[c] + ";color:" + CONT_FILL[c] + '"></i><span class="lg-name">' + CONT_NAME[c] + "</span>";
       const chk = document.createElement("input");
-      chk.type = "checkbox"; chk.className = "lg-chk"; chk.checked = !contOff.has(c);
-      chk.title = "이 대륙 표시 켜기/끄기";
+      chk.type = "checkbox"; chk.className = "lg-chk";
+      chk.checked = cties.every((n) => sel.has(n));
+      chk.title = "이 대륙 전체 선택/해제";
       chk.addEventListener("click", (e) => e.stopPropagation());
       chk.addEventListener("change", () => {
-        if (chk.checked) contOff.delete(c); else contOff.add(c);
-        item.classList.toggle("off", !chk.checked);
+        if (chk.checked) cties.forEach((n) => sel.add(n)); else cties.forEach((n) => sel.delete(n));
+        applyFilter(); refreshUI();
       });
       item.appendChild(chk);
-      item.addEventListener("click", () => openPanel(c));
+      item.addEventListener("click", () => openCountryPanel(mode, c));
       host.appendChild(item);
     }
   }
 
-  function openPanel(c) {
-    const panel = document.getElementById("contpanel");
+  function openCountryPanel(mode, c) {
+    curPanel = { mode, cont: c };
+    const panel = document.getElementById("countrypanel");
     if (!panel) return;
-    document.getElementById("cp-title").textContent = CONT_NAME[c] + " 주요 국가";
+    document.getElementById("cp-title").textContent = (mode === "dep" ? "출발" : "도착") + " · " + CONT_NAME[c];
     const list = document.getElementById("cp-list");
     list.innerHTML = "";
-    const arr = (byCont && byCont[c]) || [];
-    if (!arr.length) {
-      list.innerHTML = '<div class="cp-empty">표시할 국가가 없습니다</div>';
-    }
-    for (const ci of arr) {
-      const name = routeCountries[ci];
-      if (!name) continue;
-      const row = document.createElement("label");
+    const sel = selOf(mode);
+    const tree = treeOf(mode)[c];
+    for (const name of countriesOf(mode, c)) {
+      const row = document.createElement("div");
       row.className = "cp-row";
       const cb = document.createElement("input");
-      cb.type = "checkbox"; cb.checked = !countryOff.has(name);
+      cb.type = "checkbox"; cb.checked = sel.has(name);
       cb.addEventListener("change", () => {
-        if (cb.checked) countryOff.delete(name); else countryOff.add(name);
+        if (cb.checked) sel.add(name); else sel.delete(name);
+        applyFilter(); refreshLegendsOnly();
       });
       const sw = document.createElement("i");
-      sw.style.background = CONT_FILL[c];
-      sw.style.color = CONT_FILL[c];
-      const sp = document.createElement("span");
-      sp.textContent = koName(name);
-      row.appendChild(cb); row.appendChild(sw); row.appendChild(sp);
+      sw.style.background = CONT_FILL[c]; sw.style.color = CONT_FILL[c];
+      const nm = document.createElement("span");
+      nm.className = "cp-cty"; nm.textContent = koName(name);
+      const sub = document.createElement("div");
+      sub.className = "cp-air"; sub.hidden = true;
+      const aps = [...(tree.get(name) || [])].map((i) => airports[i])
+        .sort((a, b) => (b ? 0 : 0));
+      sub.innerHTML = aps.map((a) => "· " + (a.iata ? a.iata + " " : "") + a.name).join("<br>") || "공항 정보 없음";
+      nm.addEventListener("click", () => { sub.hidden = !sub.hidden; });
+      row.appendChild(cb); row.appendChild(sw); row.appendChild(nm);
       list.appendChild(row);
+      list.appendChild(sub);
     }
     panel.hidden = false;
   }
-  const cpClose = document.getElementById("cp-close");
-  if (cpClose) cpClose.addEventListener("click", () => { document.getElementById("contpanel").hidden = true; });
+
+  function refreshLegendsOnly() { buildLegends(); }
+  function refreshUI() { buildLegends(); if (curPanel) openCountryPanel(curPanel.mode, curPanel.cont); }
+
+  const cpCloseBtn = document.getElementById("cp-close");
+  if (cpCloseBtn) cpCloseBtn.addEventListener("click", () => {
+    document.getElementById("countrypanel").hidden = true;
+    curPanel = null; buildLegends();
+  });
+
+  // ---- route click → record-count popup ----------------------------------
+  function segDist(px, py, ax, ay, bx, by) {
+    const dx = bx - ax, dy = by - ay;
+    const l2 = dx * dx + dy * dy;
+    let t = l2 ? ((px - ax) * dx + (py - ay) * dy) / l2 : 0;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+  }
+
+  function routeClick(x, y) {
+    if (liveMode || !shown.length) { hideRoutePopup(); return; }
+    const rot = projection.rotate();
+    const center = [-rot[0], -rot[1]];
+    const horizon = Math.PI / 2 - 0.02;
+    let best = null, bestD = 9;
+    for (const ri of shown) {
+      const r = routes[ri];
+      const pts = r.lineCoords;
+      for (let i = 0; i < pts.length - 1; i++) {
+        if (d3.geoDistance(pts[i], center) > horizon || d3.geoDistance(pts[i + 1], center) > horizon) continue;
+        const pa = projection(pts[i]), pb = projection(pts[i + 1]);
+        const d = segDist(x, y, pa[0], pa[1], pb[0], pb[1]);
+        if (d < bestD) { bestD = d; best = r; }
+      }
+    }
+    if (best) showRoutePopup(x, y, best); else hideRoutePopup();
+  }
+
+  function showRoutePopup(x, y, r) {
+    const pop = document.getElementById("routepop");
+    if (!pop) return;
+    const o = (r.oAir.iata || r.oAir.name) + " · " + koName(r.oCountry);
+    const d = (r.dAir.iata || r.dAir.name) + " · " + koName(r.dCountry);
+    pop.innerHTML =
+      '<div class="rp-route"><span>' + o + "</span><i class=\"ti ti-arrow-right\"></i><span>" + d + "</span></div>" +
+      '<div class="rp-count">운항 기록 약 <b>' + r.w.toLocaleString("ko-KR") + "</b>건 <span>(항공사·노선 수 기준)</span></div>";
+    pop.style.left = Math.min(window.innerWidth - 240, Math.max(8, x + 12)) + "px";
+    pop.style.top = Math.min(window.innerHeight - 90, Math.max(8, y + 12)) + "px";
+    pop.hidden = false;
+  }
+  function hideRoutePopup() { const pop = document.getElementById("routepop"); if (pop) pop.hidden = true; }
+
+  // ---- default selection from visitor geo --------------------------------
+  let geoName = null, geoTried = false, routesReady = false, defaultApplied = false;
+  function applyDefault() {
+    if (defaultApplied || !routesReady || !geoTried) return;
+    defaultApplied = true;
+    // Preselect the visitor country as DEPARTURE (per chosen default).
+    if (geoName) {
+      let found = false;
+      for (const c in depTree) if (depTree[c].has(geoName)) { found = true; break; }
+      if (found) {
+        depSel.add(geoName);
+        applyFilter();
+        // Open its departure panel for context.
+        for (const c of LEGEND_ORDER) if (depTree[c] && depTree[c].has(geoName)) { openCountryPanel("dep", c); break; }
+      }
+    }
+    buildLegends();
+  }
 
   window.addEventListener("resize", resize);
 
@@ -752,12 +912,18 @@
       console.error("Failed to load map data:", err);
     });
 
-  fetch("routes.json?v=3")
+  fetch("routes.json?v=4")
     .then((r) => r.json())
-    .then((d) => { buildRoutes(d); buildLegend(); if (daily) setDay(dayIndex); })
+    .then((d) => {
+      buildRoutes(d);
+      buildLegends();
+      if (daily) setDay(dayIndex);
+      routesReady = true;
+      applyDefault();
+    })
     .catch((err) => { console.error("Failed to load routes:", err); });
 
-  fetch("daily.json?v=3")
+  fetch("daily.json?v=4")
     .then((r) => r.json())
     .then((d) => {
       daily = d;
@@ -767,4 +933,11 @@
       setDay(d.counts.length - 1); // start at the most recent day
     })
     .catch((err) => { console.error("Failed to load daily data:", err); });
+
+  // Visitor country → default departure selection (Vercel geo header).
+  fetch("/api/geo")
+    .then((r) => r.json())
+    .then((g) => { geoName = g && g.name; })
+    .catch(() => {})
+    .finally(() => { geoTried = true; applyDefault(); });
 })();

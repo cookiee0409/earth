@@ -18,19 +18,27 @@
 
   <div id="hint">드래그로 돌리기 · 휠 또는 ± 버튼으로 확대·축소</div>
 
-  <div id="legend">
-    <div class="lg-title">대륙 · 클릭하면 국가</div>
-    <div id="legend-items"></div>
+  <div id="filterbox">
+    <div class="fl-sec">
+      <div class="fl-title"><span class="fl-dot dep"></span>출발 · 클릭 시 국가</div>
+      <div id="dep-items"></div>
+    </div>
+    <div class="fl-sec">
+      <div class="fl-title"><span class="fl-dot arr"></span>도착 · 클릭 시 국가</div>
+      <div id="arr-items"></div>
+    </div>
   </div>
 
-  <div id="contpanel" hidden>
+  <div id="countrypanel" hidden>
     <div id="cp-head">
       <span id="cp-title"></span>
       <button id="cp-close" aria-label="닫기">✕</button>
     </div>
     <div id="cp-list"></div>
-    <div class="cp-foot">체크를 끄면 해당 국가 항공편이 숨겨집니다</div>
+    <div class="cp-foot">국가 체크 = 필터 · 국가명 클릭 = 공항 목록</div>
   </div>
+
+  <div id="routepop" hidden></div>
 
   <div id="flightbar">
     <div class="fb-row">
