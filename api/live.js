@@ -16,12 +16,14 @@ const MAX_SAMPLE = 900;
 // [lat, lon, distance(nm)] regional centres covering the busiest airspaces.
 // adsb.lol rate-limits hard, so we keep the count modest and fetch with low
 // concurrency (see runLimited) rather than firing them all at once.
+// Ordered for geographic spread first, so if the rate limit clips the tail we
+// still keep wide coverage rather than losing one whole hemisphere.
 const REGIONS = [
   [50, 8, 550],    // Europe
   [40, -95, 800],  // North America (central — wide radius covers E + W)
   [31, 112, 650],  // East / SE Asia
-  [20, 80, 650],   // South Asia (India) + Gulf edge
   [-15, -55, 750], // South America
+  [20, 80, 650],   // South Asia (India) + Gulf edge
 ];
 
 // Run async tasks with limited concurrency and a small gap between starts,
@@ -95,7 +97,7 @@ module.exports = async function handler(req, res) {
     const results = await runLimited(
       REGIONS.map(([la, lo, d]) => () => fetchRegion(la, lo, d)),
       1,     // concurrency — adsb.lol rate-limits ~1 req/s
-      1100,  // gap between requests (ms)
+      2000,  // gap between requests (ms)
     );
 
     // Per region: keep airborne aircraft with a position, dedupe globally by hex.
