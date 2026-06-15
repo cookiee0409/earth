@@ -30,6 +30,20 @@ function continentOf(lon, lat) {
 let cache = { at: 0, body: null };
 let token = { value: null, exp: 0 };
 
+// Force IPv4 + a connect timeout. Serverless egress often has broken IPv6,
+// which makes undici hang ~10s on the AAAA address and throw "fetch failed".
+let dispatcherSet = false;
+function ensureIPv4() {
+  if (dispatcherSet) return;
+  dispatcherSet = true;
+  try {
+    const { Agent, setGlobalDispatcher } = require("undici");
+    setGlobalDispatcher(new Agent({ connect: { family: 4, timeout: 8000 } }));
+  } catch (_) { /* undici unavailable — fall back to default */ }
+}
+
+const UA = "neon-earth/1.0 (+https://earth-iota-three.vercel.app)";
+
 async function getToken() {
   const id = process.env.OPENSKY_CLIENT_ID;
   const secret = process.env.OPENSKY_CLIENT_SECRET;
@@ -42,7 +56,7 @@ async function getToken() {
   });
   const r = await fetch(TOKEN_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": UA },
     body,
   });
   if (!r.ok) return null;
@@ -52,6 +66,7 @@ async function getToken() {
 }
 
 module.exports = async function handler(req, res) {
+  ensureIPv4();
   res.setHeader("Cache-Control", "public, s-maxage=15, stale-while-revalidate=45");
 
   // Warm-lambda memory cache (second line of defence against rate limits).
@@ -61,7 +76,8 @@ module.exports = async function handler(req, res) {
 
   try {
     const tok = await getToken();
-    const headers = tok ? { Authorization: "Bearer " + tok } : {};
+    const headers = { "User-Agent": UA, Accept: "application/json" };
+    if (tok) headers.Authorization = "Bearer " + tok;
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 25000);
     const r = await fetch(STATES_URL, { headers, signal: ctrl.signal });
