@@ -97,7 +97,7 @@ module.exports = async function handler(req, res) {
     const results = await runLimited(
       REGIONS.map(([la, lo, d]) => () => fetchRegion(la, lo, d)),
       1,     // concurrency — adsb.lol rate-limits ~1 req/s
-      2000,  // gap between requests (ms)
+      1200,  // gap between requests (ms)
     );
 
     // Per region: keep airborne aircraft with a position, dedupe globally by hex.
