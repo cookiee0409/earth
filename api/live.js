@@ -1,37 +1,63 @@
-// Vercel serverless function: real-time aircraft from the OpenSky Network.
+// Vercel serverless function: real-time aircraft from community ADS-B (adsb.lol).
 //
-// Returns a compact, sampled snapshot of aircraft currently airborne worldwide.
-// This is MEASURED live data (unlike the modeled daily.json history).
+// Returns a compact, sampled snapshot of aircraft currently airborne, MEASURED
+// from the adsb.lol feed (live ADS-B). We query several regional centres in
+// parallel (adsb.lol has no single global endpoint) and merge/dedupe by hex,
+// so coverage is dense over busy airspaces (Europe, N.America, E/S Asia, Gulf,
+// Oceania, S.America) and sparse over open ocean — which is honest for ADS-B.
 //
-// Auth: if OPENSKY_CLIENT_ID / OPENSKY_CLIENT_SECRET env vars are set, uses
-// OAuth2 client-credentials (higher rate limits). Otherwise falls back to
-// anonymous access, which works but is rate-limited — so we cache hard at the
-// edge (s-maxage) and in warm-lambda memory to share one upstream call.
+// Why not OpenSky? OpenSky refuses TCP connections from Vercel's datacenter IPs
+// (UND_ERR_CONNECT_TIMEOUT) and only allows browser CORS from its own domain,
+// so it's unreachable both from the server and the client here.
 
-const STATES_URL = "https://opensky-network.org/api/states/all";
-const TOKEN_URL =
-  "https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token";
-const MAX_SAMPLE = 700;
+const UA = "neon-earth/1.0 (+https://earth-iota-three.vercel.app)";
+const MAX_SAMPLE = 900;
 
-// idx 0..6: Asia, Europe, Africa, N.America, S.America, Oceania, Other
+// [lat, lon, distance(nm)] regional centres covering the busiest airspaces.
+// adsb.lol rate-limits hard, so we keep the count modest and fetch with low
+// concurrency (see runLimited) rather than firing them all at once.
+const REGIONS = [
+  [50, 8, 650],     // Europe
+  [40, -95, 900],   // North America (central — wide radius covers E + W)
+  [33, 118, 700],   // East Asia (China east / Korea / Japan)
+  [18, 84, 750],    // South & SE Asia + Gulf edge
+  [-28, 140, 750],  // Oceania
+  [-12, -55, 800],  // South America
+];
+
+// Run async tasks with limited concurrency and a small gap between starts,
+// to stay under adsb.lol's rate limit.
+async function runLimited(tasks, limit, gapMs) {
+  const out = new Array(tasks.length);
+  let next = 0;
+  async function worker() {
+    while (next < tasks.length) {
+      const i = next++;
+      out[i] = await tasks[i]();
+      if (gapMs) await new Promise((r) => setTimeout(r, gapMs));
+    }
+  }
+  await Promise.all(Array.from({ length: limit }, worker));
+  return out;
+}
+
+// 0 Asia, 1 Europe, 2 Africa, 3 N.America, 4 S.America, 5 Oceania, 6 Other
 function continentOf(lon, lat) {
   if (lat < -60) return 6;
-  if (lon >= -93 && lon <= -32 && lat >= -57 && lat <= 14) return 4; // S.America
-  if (lon >= -170 && lon <= -50 && lat > 14 && lat <= 84) return 3;  // N.America
-  if (lon >= -130 && lon <= -58 && lat >= 7 && lat <= 33) return 3;  // Central America
-  if (lon >= -25 && lon <= 40 && lat >= 36 && lat <= 72) return 1;   // Europe
-  if (lon >= -20 && lon <= 52 && lat >= -37 && lat < 36) return 2;   // Africa
-  if (lon >= 110 && lon <= 180 && lat >= -50 && lat <= 0) return 5;  // Oceania
-  if (lon >= 40 && lon <= 180 && lat >= -10 && lat <= 82) return 0;  // Asia
-  if (lon >= 25 && lon < 40 && lat >= 36) return 0;                  // W.Asia
+  if (lon >= -93 && lon <= -32 && lat >= -57 && lat <= 14) return 4;
+  if (lon >= -170 && lon <= -50 && lat > 14 && lat <= 84) return 3;
+  if (lon >= -130 && lon <= -58 && lat >= 7 && lat <= 33) return 3;
+  if (lon >= -25 && lon <= 40 && lat >= 36 && lat <= 72) return 1;
+  if (lon >= -20 && lon <= 52 && lat >= -37 && lat < 36) return 2;
+  if (lon >= 110 && lon <= 180 && lat >= -50 && lat <= 0) return 5;
+  if (lon >= 40 && lon <= 180 && lat >= -10 && lat <= 82) return 0;
+  if (lon >= 25 && lon < 40 && lat >= 36) return 0;
   return 6;
 }
 
 let cache = { at: 0, body: null };
-let token = { value: null, exp: 0 };
 
-// Force IPv4 + a connect timeout. Serverless egress often has broken IPv6,
-// which makes undici hang ~10s on the AAAA address and throw "fetch failed".
+// Serverless egress can hang on IPv6; force IPv4 with a connect timeout.
 let dispatcherSet = false;
 function ensureIPv4() {
   if (dispatcherSet) return;
@@ -39,91 +65,82 @@ function ensureIPv4() {
   try {
     const { Agent, setGlobalDispatcher } = require("undici");
     setGlobalDispatcher(new Agent({ connect: { family: 4, timeout: 8000 } }));
-  } catch (_) { /* undici unavailable — fall back to default */ }
+  } catch (_) { /* fall back to default */ }
 }
 
-const UA = "neon-earth/1.0 (+https://earth-iota-three.vercel.app)";
-
-async function getToken() {
-  const id = process.env.OPENSKY_CLIENT_ID;
-  const secret = process.env.OPENSKY_CLIENT_SECRET;
-  if (!id || !secret) return null;
-  if (token.value && Date.now() < token.exp) return token.value;
-  const body = new URLSearchParams({
-    grant_type: "client_credentials",
-    client_id: id,
-    client_secret: secret,
-  });
-  const r = await fetch(TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": UA },
-    body,
-  });
-  if (!r.ok) return null;
-  const j = await r.json();
-  token = { value: j.access_token, exp: Date.now() + (j.expires_in - 30) * 1000 };
-  return token.value;
+async function fetchRegion(lat, lon, dist) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 12000);
+  try {
+    const url = `https://api.adsb.lol/v2/lat/${lat}/lon/${lon}/dist/${dist}`;
+    const r = await fetch(url, { headers: { "User-Agent": UA, Accept: "application/json" }, signal: ctrl.signal });
+    if (!r.ok) return [];
+    const j = await r.json();
+    return j.ac || [];
+  } catch (_) {
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 module.exports = async function handler(req, res) {
   ensureIPv4();
-  res.setHeader("Cache-Control", "public, s-maxage=15, stale-while-revalidate=45");
+  res.setHeader("Cache-Control", "public, s-maxage=20, stale-while-revalidate=60");
 
-  // Warm-lambda memory cache (second line of defence against rate limits).
-  if (cache.body && Date.now() - cache.at < 12000) {
+  if (cache.body && Date.now() - cache.at < 15000) {
     return res.status(200).json(cache.body);
   }
 
   try {
-    // Diagnostic: ?probe checks general outbound egress (CORS-friendly host).
-    if (req.url && req.url.includes("probe")) {
-      const t0 = Date.now();
-      const pr = await fetch("https://api.github.com/meta", { headers: { "User-Agent": UA } });
-      return res.status(200).json({ probe: "github", ok: pr.ok, status: pr.status, ms: Date.now() - t0 });
-    }
+    const results = await runLimited(
+      REGIONS.map(([la, lo, d]) => () => fetchRegion(la, lo, d)),
+      2,    // concurrency
+      450,  // gap between starts (ms)
+    );
 
-    const tok = await getToken();
-    const headers = { "User-Agent": UA, Accept: "application/json" };
-    if (tok) headers.Authorization = "Bearer " + tok;
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 25000);
-    const r = await fetch(STATES_URL, { headers, signal: ctrl.signal });
-    clearTimeout(timer);
-    if (!r.ok) throw new Error("opensky " + r.status);
-    const data = await r.json();
+    // Per region: keep airborne aircraft with a position, dedupe globally by hex.
+    const seen = new Set();
+    const perRegionValid = results.map((list) => {
+      const valid = [];
+      for (const a of list) {
+        if (!a || a.lat == null || a.lon == null || a.alt_baro === "ground") continue;
+        if (a.hex) { if (seen.has(a.hex)) continue; seen.add(a.hex); }
+        valid.push(a);
+      }
+      return valid;
+    });
 
-    const states = data.states || [];
-    const airborne = [];
-    for (const s of states) {
-      const lon = s[5], lat = s[6], onGround = s[8];
-      if (onGround || lon == null || lat == null) continue;
-      airborne.push(s);
-    }
+    const count = perRegionValid.reduce((n, v) => n + v.length, 0);
+    if (!count) throw new Error("no aircraft returned");
 
-    // Even sampling across the airborne list.
-    const count = airborne.length;
-    const step = Math.max(1, Math.floor(count / MAX_SAMPLE));
+    // Sample each region evenly so every covered continent is represented,
+    // instead of letting the densest region (Europe) dominate.
+    const per = Math.ceil(MAX_SAMPLE / REGIONS.length);
     const sample = [];
-    for (let i = 0; i < count && sample.length < MAX_SAMPLE; i += step) {
-      const s = airborne[i];
-      const lon = s[5], lat = s[6];
-      const track = s[10] == null ? 0 : s[10];
-      const vel = s[9] == null ? 0 : s[9];
-      sample.push([
-        Math.round(lon * 100) / 100,
-        Math.round(lat * 100) / 100,
-        Math.round(track),
-        Math.round(vel),
-        continentOf(lon, lat),
-      ]);
+    for (const valid of perRegionValid) {
+      const step = Math.max(1, Math.floor(valid.length / per));
+      let taken = 0;
+      for (let i = 0; i < valid.length && taken < per && sample.length < MAX_SAMPLE; i += step) {
+        const a = valid[i];
+        const track = (a.track != null ? a.track : (a.true_heading != null ? a.true_heading : 0));
+        const velMs = (a.gs != null ? a.gs : 0) * 0.514444; // knots -> m/s
+        sample.push([
+          Math.round(a.lon * 100) / 100,
+          Math.round(a.lat * 100) / 100,
+          Math.round(track),
+          Math.round(velMs),
+          continentOf(a.lon, a.lat),
+        ]);
+        taken++;
+      }
     }
-
-    const body = { time: data.time, count, sampled: sample.length, source: "OpenSky Network", sample };
+    const body = { time: Math.floor(Date.now() / 1000), count, sampled: sample.length, source: "adsb.lol", sample };
     cache = { at: Date.now(), body };
     return res.status(200).json(body);
   } catch (err) {
     if (cache.body) return res.status(200).json(cache.body); // serve stale on error
     const cause = err && err.cause ? (err.cause.code || String(err.cause)) : null;
-    return res.status(502).json({ error: "live data unavailable", detail: String(err && err.message || err), cause });
+    return res.status(502).json({ error: "live data unavailable", detail: String((err && err.message) || err), cause });
   }
-}
+};

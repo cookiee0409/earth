@@ -167,7 +167,7 @@
         // cap to screen-based plane budget
         if (livePlanes.length > maxPlanes) livePlanes.length = maxPlanes;
         elDate.textContent = "LIVE";
-        elCount.textContent = "현재 비행 중 약 " + liveCount.toLocaleString("ko-KR") + "대";
+        elCount.textContent = "실시간 " + liveCount.toLocaleString("ko-KR") + "대 추적 (ADS-B)";
       })
       .catch((err) => {
         liveLoading = false;
