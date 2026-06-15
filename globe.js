@@ -7,7 +7,7 @@
   let width = 0, height = 0, dpr = 1, cx = 0, cy = 0;
   let baseScale = 0;          // scale that fits the viewport
   let scale = 0;              // current scale (controls zoom)
-  const MIN_K = 0.55, MAX_K = 7; // zoom multipliers relative to baseScale
+  const MIN_K = 0.55, MAX_K = 16; // zoom multipliers (16× ≈ a country fills the view)
 
   // Orthographic projection — a true globe view.
   const projection = d3.geoOrthographic().clipAngle(90).precision(0.5);
@@ -56,7 +56,24 @@
   const CONT_NAME = ["아시아", "유럽", "아프리카", "북미", "남미", "오세아니아", "기타"];
   const CONT_FILL = CONT_RGB.map((c) => `rgb(${c[0]},${c[1]},${c[2]})`);
   const CONT_TRAIL = CONT_RGB.map((c) => `rgba(${c[0]},${c[1]},${c[2]},0.34)`);
-  const CONT_LINE = CONT_RGB.map((c) => `rgba(${c[0]},${c[1]},${c[2]},0.4)`);
+
+  // Per-country custom colors (override the continent color when set).
+  const countryRGB = {}; // country name -> [r,g,b]
+  function rgbOf(country, cont) { return countryRGB[country] || CONT_RGB[cont != null ? cont : 6]; }
+  const cssRGB = (a) => `rgb(${a[0]},${a[1]},${a[2]})`;
+  const cssRGBA = (a, al) => `rgba(${a[0]},${a[1]},${a[2]},${al})`;
+  function hexToRgb(h) { h = h.replace("#", ""); return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)]; }
+  function rgbToHex(a) { return "#" + a.map((x) => Math.max(0, Math.min(255, x)).toString(16).padStart(2, "0")).join(""); }
+
+  let markAirports = []; // airport indices to mark (airports of selected countries)
+  function computeMarks() {
+    markAirports = [];
+    if (!depSel.size && !arrSel.size) return;
+    for (let i = 0; i < airports.length && markAirports.length < 300; i++) {
+      const a = airports[i];
+      if (a.cty && (depSel.has(a.cty) || arrSel.has(a.cty))) markAirports.push(i);
+    }
+  }
 
   function continentOf(lon, lat) {
     if (lat < -60) return 6;
@@ -83,7 +100,7 @@
   const LINE_CAP = 450;      // draw route arcs only when shown count is manageable
 
   let speed = 1;             // playback speed multiplier
-  const BASE_MS_PER_DAY = 700; // slow by default (1×)
+  const BASE_MS_PER_DAY = 5000; // 1× = one day per 5 seconds
 
   // Departure ∩ arrival rule (both empty = no filter = show all):
   function routeShown(r) {
@@ -223,6 +240,7 @@
   // Recompute filter + plane count after a selection change.
   function applyFilter() {
     rebuildShown();
+    computeMarks();
     if (daily && !liveMode) setPlaneCount(Math.round((daily.counts[dayIndex] / maxCount) * maxPlanes));
     hideRoutePopup();
   }
@@ -317,12 +335,12 @@
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
 
-    // Persistent route arcs (great-circle paths), colored by departure continent.
+    // Persistent route arcs — thicker, faint, colored by departure country.
     if (shown.length && shown.length <= LINE_CAP) {
-      ctx.lineWidth = 0.7;
+      ctx.lineWidth = 2.1;
       for (const ri of shown) {
         const r = routes[ri];
-        ctx.strokeStyle = CONT_LINE[r.oCont];
+        ctx.strokeStyle = cssRGBA(rgbOf(r.oCountry, r.oCont), 0.2);
         ctx.beginPath();
         let started = false;
         for (let i = 0; i < r.lineCoords.length; i++) {
@@ -335,6 +353,8 @@
       }
     }
 
+    drawMarks(center, horizon);
+
     // Plane trails then glyphs (planes already live only on shown routes).
     ctx.lineWidth = 1;
     for (const pl of planes) {
@@ -342,7 +362,7 @@
       const r = routes[pl.ri];
       const head = r.interp(pl.t);
       if (d3.geoDistance(head, center) > horizon) continue;
-      ctx.strokeStyle = CONT_TRAIL[r.oCont];
+      ctx.strokeStyle = cssRGBA(rgbOf(r.oCountry, r.oCont), 0.34);
       const steps = 6, back = 0.09;
       ctx.beginPath();
       let started = false;
@@ -365,7 +385,7 @@
       const p0 = projection(head);
       const pa = projection(r.interp(Math.min(1, pl.t + 0.012)));
       const ang = Math.atan2(pa[1] - p0[1], pa[0] - p0[0]);
-      ctx.fillStyle = CONT_FILL[r.oCont];
+      ctx.fillStyle = cssRGB(rgbOf(r.oCountry, r.oCont));
       ctx.save();
       ctx.translate(p0[0], p0[1]);
       ctx.rotate(ang);
@@ -374,6 +394,27 @@
       ctx.restore();
     }
     ctx.restore();
+  }
+
+  // Airport location markers for selected countries (small glowing rings).
+  function drawMarks(center, horizon) {
+    if (!markAirports.length) return;
+    const rr = Math.max(2, Math.min(5, scale * 0.012));
+    for (const ai of markAirports) {
+      const a = airports[ai];
+      if (d3.geoDistance([a.lon, a.lat], center) > horizon) continue;
+      const p = projection([a.lon, a.lat]);
+      const col = cssRGB(rgbOf(a.cty, a.cont));
+      ctx.beginPath();
+      ctx.arc(p[0], p[1], rr, 0, Math.PI * 2);
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 1.4;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(p[0], p[1], rr * 0.35, 0, Math.PI * 2);
+      ctx.fillStyle = col;
+      ctx.fill();
+    }
   }
 
   function liveShown(pl) {
@@ -391,6 +432,7 @@
 
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
+    drawMarks(center, horizon);
     for (const pl of livePlanes) {
       if (pl.vel > 0 && !paused) { const np = destination(pl.lon, pl.lat, pl.track, pl.vel * secs); pl.lon = np[0]; pl.lat = np[1]; }
       if (!liveShown(pl)) continue;
@@ -400,7 +442,7 @@
       const ahead = destination(pl.lon, pl.lat, pl.track, 30000);
       const pa = projection(ahead);
       const ang = Math.atan2(pa[1] - p0[1], pa[0] - p0[0]);
-      ctx.fillStyle = CONT_FILL[pl.cont];
+      ctx.fillStyle = cssRGB(rgbOf(pl.country, pl.cont));
       ctx.save();
       ctx.translate(p0[0], p0[1]);
       ctx.rotate(ang);
@@ -563,7 +605,7 @@
 
     // Bloom: composite a blurred copy with additive blending (one raster blur),
     // then the sharp copy on top.
-    const blur = Math.max(4, scale * 0.018);
+    const blur = Math.max(4, Math.min(14, scale * 0.018)); // cap so deep zoom stays fast
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
     if ("filter" in ctx) {
@@ -609,10 +651,7 @@
     const dt = t - lastFrame;
     lastFrame = t;
     frameDt = dt;
-    if (autoSpin && !paused) {
-      rotation[0] = (rotation[0] + (t - lastSpin) * 0.006) % 360; // ~6°/s
-    }
-    lastSpin = t;
+    lastSpin = t; // auto-rotation disabled — globe only turns when dragged
     if (!paused && !liveMode && daily) {
       playAccum += dt;
       const msPerDay = BASE_MS_PER_DAY / speed;
@@ -766,9 +805,12 @@
       item.className = "lg-item";
       if (curPanel && curPanel.mode === mode && curPanel.cont === c) item.classList.add("active");
       item.innerHTML = '<i style="background:' + CONT_FILL[c] + ";color:" + CONT_FILL[c] + '"></i><span class="lg-name">' + CONT_NAME[c] + "</span>";
+      const selCount = cties.reduce((k, n) => k + (sel.has(n) ? 1 : 0), 0);
+      if (selCount > 0 && selCount < cties.length) item.classList.add("partial");
       const chk = document.createElement("input");
       chk.type = "checkbox"; chk.className = "lg-chk";
-      chk.checked = cties.every((n) => sel.has(n));
+      chk.checked = selCount === cties.length;
+      chk.indeterminate = selCount > 0 && selCount < cties.length;
       chk.title = "이 대륙 전체 선택/해제";
       chk.addEventListener("click", (e) => e.stopPropagation());
       chk.addEventListener("change", () => {
@@ -799,8 +841,11 @@
         if (cb.checked) sel.add(name); else sel.delete(name);
         applyFilter(); refreshLegendsOnly();
       });
-      const sw = document.createElement("i");
-      sw.style.background = CONT_FILL[c]; sw.style.color = CONT_FILL[c];
+      const sw = document.createElement("input");
+      sw.type = "color"; sw.className = "cp-color";
+      sw.value = rgbToHex(rgbOf(name, c));
+      sw.title = "이 국가 색상 지정 (클릭하면 팔레트)";
+      sw.addEventListener("input", () => { countryRGB[name] = hexToRgb(sw.value); });
       const nm = document.createElement("span");
       nm.className = "cp-cty"; nm.textContent = koName(name);
       const sub = document.createElement("div");
@@ -859,11 +904,9 @@
     const o = (r.oAir.iata || r.oAir.name) + " · " + koName(r.oCountry);
     const d = (r.dAir.iata || r.dAir.name) + " · " + koName(r.dCountry);
     pop.innerHTML =
-      '<div class="rp-route"><span>' + o + "</span><i class=\"ti ti-arrow-right\"></i><span>" + d + "</span></div>" +
+      '<div class="rp-route"><span>' + o + "</span> → <span>" + d + "</span></div>" +
       '<div class="rp-count">운항 기록 약 <b>' + r.w.toLocaleString("ko-KR") + "</b>건 <span>(항공사·노선 수 기준)</span></div>";
-    pop.style.left = Math.min(window.innerWidth - 240, Math.max(8, x + 12)) + "px";
-    pop.style.top = Math.min(window.innerHeight - 90, Math.max(8, y + 12)) + "px";
-    pop.hidden = false;
+    pop.hidden = false; // position is fixed top-right via CSS
   }
   function hideRoutePopup() { const pop = document.getElementById("routepop"); if (pop) pop.hidden = true; }
 
