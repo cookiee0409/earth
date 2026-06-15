@@ -17,12 +17,11 @@ const MAX_SAMPLE = 900;
 // adsb.lol rate-limits hard, so we keep the count modest and fetch with low
 // concurrency (see runLimited) rather than firing them all at once.
 const REGIONS = [
-  [50, 8, 650],     // Europe
-  [40, -95, 900],   // North America (central — wide radius covers E + W)
-  [33, 118, 700],   // East Asia (China east / Korea / Japan)
-  [18, 84, 750],    // South & SE Asia + Gulf edge
-  [-28, 140, 750],  // Oceania
-  [-12, -55, 800],  // South America
+  [50, 8, 550],    // Europe
+  [40, -95, 800],  // North America (central — wide radius covers E + W)
+  [31, 112, 650],  // East / SE Asia
+  [20, 80, 650],   // South Asia (India) + Gulf edge
+  [-15, -55, 750], // South America
 ];
 
 // Run async tasks with limited concurrency and a small gap between starts,
@@ -70,7 +69,7 @@ function ensureIPv4() {
 
 async function fetchRegion(lat, lon, dist) {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 12000);
+  const timer = setTimeout(() => ctrl.abort(), 9000);
   try {
     const url = `https://api.adsb.lol/v2/lat/${lat}/lon/${lon}/dist/${dist}`;
     const r = await fetch(url, { headers: { "User-Agent": UA, Accept: "application/json" }, signal: ctrl.signal });
@@ -95,8 +94,8 @@ module.exports = async function handler(req, res) {
   try {
     const results = await runLimited(
       REGIONS.map(([la, lo, d]) => () => fetchRegion(la, lo, d)),
-      2,    // concurrency
-      450,  // gap between starts (ms)
+      1,     // concurrency — adsb.lol rate-limits ~1 req/s
+      1100,  // gap between requests (ms)
     );
 
     // Per region: keep airborne aircraft with a position, dedupe globally by hex.
