@@ -115,6 +115,16 @@ function airIdxOf(id) {
 
 const rows = top.map((r) => [r.w, airIdxOf(r.s), airIdxOf(r.d)]);
 
+// Fix each country to a SINGLE continent (override, else majority of its airports),
+// so a country never appears under two continents (Russia, Indonesia, Morocco, …).
+const OVERRIDE = { Russia: 1, Indonesia: 0, Morocco: 2, Algeria: 2 };
+const votes = {};
+for (const a of airports) { if (a[2] < 0) continue; (votes[a[2]] = votes[a[2]] || {}); votes[a[2]][a[3]] = (votes[a[2]][a[3]] || 0) + 1; }
+const ctyCont = {};
+for (const ci in votes) { const v = votes[ci]; ctyCont[ci] = Object.keys(v).map(Number).sort((x, y) => v[y] - v[x])[0]; }
+for (const name in OVERRIDE) { const ci = countryIdx.get(name); if (ci != null) ctyCont[ci] = OVERRIDE[name]; }
+for (const a of airports) { if (a[2] >= 0 && ctyCont[a[2]] != null) a[3] = ctyCont[a[2]]; }
+
 const out = {
   meta: { source: "OpenFlights + Natural Earth", kept: rows.length, airports: airports.length, countries: countries.length },
   countries, airports, routes: rows,

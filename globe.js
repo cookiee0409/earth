@@ -68,10 +68,11 @@
   let markAirports = []; // airport indices to mark (airports of selected countries)
   function computeMarks() {
     markAirports = [];
-    if (!depSel.size && !arrSel.size) return;
-    for (let i = 0; i < airports.length && markAirports.length < 300; i++) {
+    const showAll = alwaysAirports;
+    if (!showAll && !depSel.size && !arrSel.size) return;
+    for (let i = 0; i < airports.length && markAirports.length < 500; i++) {
       const a = airports[i];
-      if (a.cty && (depSel.has(a.cty) || arrSel.has(a.cty))) markAirports.push(i);
+      if (showAll || (a.cty && (depSel.has(a.cty) || arrSel.has(a.cty)))) markAirports.push(i);
     }
   }
 
@@ -99,6 +100,28 @@
   let countryFeatures = null, countryBounds = null; // for live point-in-country
   const LINE_CAP = 450;      // draw route arcs only when shown count is manageable
   let wP80 = 0, wP95 = 0;    // weight percentiles → route line thickness/brightness tiers
+  let focusRoute = null;     // a clicked single route (overrides the filter)
+  let focusCountry = null;   // a clicked country whose analysis fills the summary
+  let neonOn = true;         // neon land glow toggle
+  let alwaysAirports = false; // show all airports as markers even without a selection
+  let countryAirports = {};  // country name -> [airport idx] (all airports of the country)
+
+  // Plane cap by how narrow the current view is.
+  function coversFullContinent(sel, tree) {
+    for (const c in tree) {
+      const cties = [...tree[c].keys()];
+      if (cties.length && cties.every((n) => sel.has(n))) return true;
+    }
+    return false;
+  }
+  function selectionCap() {
+    if (focusRoute != null) return 5;            // a single clicked route
+    const d = depSel.size > 0, a = arrSel.size > 0;
+    if (d && a) return 20;                        // country → country
+    if (d) return coversFullContinent(depSel, depTree) ? 60 : 50;
+    if (a) return coversFullContinent(arrSel, arrTree) ? 60 : 50;
+    return 80;                                    // whole world
+  }
 
   let speed = 1;             // playback speed multiplier
   const BASE_MS_PER_DAY = 5000; // 1× = one day per 5 seconds
@@ -112,23 +135,32 @@
 
   // Korean labels for the countries that appear in the panels.
   const KO = {
-    "China": "중국", "India": "인도", "Japan": "일본", "Malaysia": "말레이시아",
-    "United Arab Emirates": "아랍에미리트", "Indonesia": "인도네시아", "Thailand": "태국",
-    "South Korea": "대한민국", "Saudi Arabia": "사우디아라비아", "Philippines": "필리핀",
-    "Spain": "스페인", "France": "프랑스", "Italy": "이탈리아", "Germany": "독일",
-    "Portugal": "포르투갈", "United Kingdom": "영국", "Turkey": "튀르키예", "Austria": "오스트리아",
-    "Greece": "그리스", "Belgium": "벨기에", "Netherlands": "네덜란드", "Switzerland": "스위스",
-    "Burkina Faso": "부르키나파소", "South Africa": "남아프리카공화국", "Ghana": "가나",
-    "Morocco": "모로코", "Ethiopia": "에티오피아", "Rwanda": "르완다", "Benin": "베냉",
-    "Senegal": "세네갈", "Burundi": "부룬디", "Tanzania": "탄자니아", "Egypt": "이집트",
-    "Kenya": "케냐", "Nigeria": "나이지리아", "Algeria": "알제리",
-    "United States of America": "미국", "Canada": "캐나다", "Mexico": "멕시코",
-    "Puerto Rico": "푸에르토리코", "Guatemala": "과테말라", "Haiti": "아이티",
-    "Dominican Rep.": "도미니카공화국", "Jamaica": "자메이카", "Honduras": "온두라스", "Cuba": "쿠바",
-    "Brazil": "브라질", "Colombia": "콜롬비아", "Peru": "페루", "Ecuador": "에콰도르",
-    "Chile": "칠레", "Venezuela": "베네수엘라", "Panama": "파나마", "El Salvador": "엘살바도르",
-    "Bolivia": "볼리비아", "Nicaragua": "니카라과", "Argentina": "아르헨티나",
-    "Australia": "호주", "New Zealand": "뉴질랜드", "Fiji": "피지", "Papua New Guinea": "파푸아뉴기니",
+    "Afghanistan": "아프가니스탄", "Albania": "알바니아", "Algeria": "알제리", "Argentina": "아르헨티나",
+    "Australia": "호주", "Austria": "오스트리아", "Bangladesh": "방글라데시", "Belgium": "벨기에",
+    "Benin": "베냉", "Bolivia": "볼리비아", "Brazil": "브라질", "Burkina Faso": "부르키나파소",
+    "Burundi": "부룬디", "Cambodia": "캄보디아", "Cameroon": "카메룬", "Canada": "캐나다",
+    "Chile": "칠레", "China": "중국", "Colombia": "콜롬비아", "Croatia": "크로아티아",
+    "Cyprus": "키프로스", "Czechia": "체코", "Côte d'Ivoire": "코트디부아르",
+    "Dem. Rep. Congo": "콩고민주공화국", "Denmark": "덴마크", "Dominican Rep.": "도미니카공화국",
+    "Ecuador": "에콰도르", "Egypt": "이집트", "Ethiopia": "에티오피아", "Finland": "핀란드",
+    "France": "프랑스", "Gambia": "감비아", "Germany": "독일", "Ghana": "가나", "Greece": "그리스",
+    "Guatemala": "과테말라", "Guinea": "기니", "India": "인도", "Indonesia": "인도네시아",
+    "Iran": "이란", "Ireland": "아일랜드", "Italy": "이탈리아", "Japan": "일본",
+    "Kazakhstan": "카자흐스탄", "Kenya": "케냐", "Kuwait": "쿠웨이트", "Kyrgyzstan": "키르기스스탄",
+    "Liberia": "라이베리아", "Libya": "리비아", "Malawi": "말라위", "Malaysia": "말레이시아",
+    "Mali": "말리", "Mexico": "멕시코", "Montenegro": "몬테네그로", "Morocco": "모로코",
+    "Myanmar": "미얀마", "Namibia": "나미비아", "Nepal": "네팔", "Netherlands": "네덜란드",
+    "New Zealand": "뉴질랜드", "Niger": "니제르", "Nigeria": "나이지리아", "Norway": "노르웨이",
+    "Oman": "오만", "Pakistan": "파키스탄", "Panama": "파나마", "Peru": "페루",
+    "Philippines": "필리핀", "Poland": "폴란드", "Portugal": "포르투갈", "Puerto Rico": "푸에르토리코",
+    "Romania": "루마니아", "Russia": "러시아", "Rwanda": "르완다", "Saudi Arabia": "사우디아라비아",
+    "Senegal": "세네갈", "Serbia": "세르비아", "Sierra Leone": "시에라리온", "Somalia": "소말리아",
+    "South Africa": "남아프리카공화국", "South Korea": "대한민국", "Spain": "스페인",
+    "Sri Lanka": "스리랑카", "Sweden": "스웨덴", "Switzerland": "스위스", "Taiwan": "대만",
+    "Tanzania": "탄자니아", "Thailand": "태국", "Togo": "토고", "Turkey": "튀르키예",
+    "Uganda": "우간다", "United Arab Emirates": "아랍에미리트", "United Kingdom": "영국",
+    "United States of America": "미국", "Venezuela": "베네수엘라", "Vietnam": "베트남",
+    "Zambia": "잠비아", "Zimbabwe": "짐바브웨",
   };
   const koName = (n) => KO[n] || n;
 
@@ -184,9 +216,20 @@
     wP80 = ws[Math.floor(ws.length * 0.8)] || 0;
     wP95 = ws[Math.floor(ws.length * 0.95)] || 0;
     buildTrees();
+    buildCountryAirports();
     computeCaps();
+    maxPlanes = selectionCap();
     rebuildShown();
     buildSummary();
+  }
+
+  function buildCountryAirports() {
+    countryAirports = {};
+    for (let i = 0; i < airports.length; i++) {
+      const c = airports[i].cty;
+      if (!c) continue;
+      (countryAirports[c] = countryAirports[c] || []).push(i);
+    }
   }
 
   function buildTrees() {
@@ -206,7 +249,6 @@
   // Scale route count and plane cap to the viewport (1280×720 ≈ baseline).
   function computeCaps() {
     const f = (width * height) / 921600;
-    maxPlanes = Math.round(Math.max(90, Math.min(560, 420 * f)));
     activeN = Math.round(Math.max(400, Math.min(routes.length || 1700, 1700 * f)));
     if (routes.length) activeN = Math.min(activeN, routes.length);
   }
@@ -215,8 +257,12 @@
   function rebuildShown() {
     if (!routes.length) return;
     shown = []; cumW = []; totalW = 0;
-    for (let i = 0; i < activeN; i++) {
-      if (routeShown(routes[i])) { shown.push(i); totalW += routes[i].w; cumW.push(totalW); }
+    if (focusRoute != null) {
+      shown = [focusRoute]; totalW = routes[focusRoute].w; cumW = [totalW];
+    } else {
+      for (let i = 0; i < activeN; i++) {
+        if (routeShown(routes[i])) { shown.push(i); totalW += routes[i].w; cumW.push(totalW); }
+      }
     }
     if (!shown.length) { planes.length = 0; return; }
     for (const pl of planes) respawn(pl);
@@ -244,11 +290,11 @@
 
   // Recompute filter + plane count after a selection change.
   function applyFilter() {
+    maxPlanes = selectionCap();
     rebuildShown();
     computeMarks();
     buildSummary();
     if (daily && !liveMode) setPlaneCount(Math.round((daily.counts[dayIndex] / maxCount) * maxPlanes));
-    hideRoutePopup();
   }
 
   function fmtISO(idx) {
@@ -279,9 +325,37 @@
     return [...map.entries()].sort((x, y) => y[1] - x[1]).slice(0, n);
   }
 
+  function renderSummary(title, rows) {
+    elSumTitle.textContent = title;
+    elSumBody.innerHTML = rows.map((r) =>
+      '<div class="sum-row"><span class="sum-k">' + r[0] + '</span><span class="sum-v">' + r[1] + "</span></div>"
+    ).join("");
+    elSummary.hidden = false;
+  }
+
+  // Detailed analysis for a single clicked country (both directions).
+  function buildCountrySummary(C) {
+    const depAir = new Map(), goC = new Map(), inC = new Map();
+    for (const r of routes) {
+      if (r.oCountry === C) {
+        const oa = r.oAir.iata || r.oAir.name;
+        depAir.set(oa, (depAir.get(oa) || 0) + r.w);
+        if (r.dCountry) goC.set(r.dCountry, (goC.get(r.dCountry) || 0) + r.w);
+      }
+      if (r.dCountry === C && r.oCountry) inC.set(r.oCountry, (inC.get(r.oCountry) || 0) + r.w);
+    }
+    const dash = (s) => s || "-";
+    renderSummary(koName(C) + " 항공 흐름", [
+      ["주요 출발 공항", dash(topByWeight(depAir, 3).map((e) => e[0]).join(", "))],
+      ["많이 가는 국가", dash(topByWeight(goC, 5).map((e) => koName(e[0])).join(", "))],
+      ["많이 들어오는 국가", dash(topByWeight(inC, 5).map((e) => koName(e[0])).join(", "))],
+    ]);
+  }
+
   function buildSummary() {
     if (!elSummary) return;
     if (liveMode || !routes.length) { elSummary.hidden = true; return; }
+    if (focusCountry) { buildCountrySummary(focusCountry); return; }
     const hasDep = depSel.size > 0, hasArr = arrSel.size > 0;
     const destC = new Map(), origC = new Map(), origA = new Map(), destA = new Map();
     for (const ri of shown) {
@@ -652,43 +726,51 @@
     // no per-path shadow (which is what made it crawl).
     lctx.clearRect(0, 0, width, height);
 
-    const sheen = lctx.createLinearGradient(cx - scale, cy - scale, cx + scale, cy + scale);
-    sheen.addColorStop(0, "#13e58a");
-    sheen.addColorStop(0.5, "#0fd6a6");
-    sheen.addColorStop(1, "#2fb6ff");
     lctx.beginPath();
     lpath(land);
-    lctx.fillStyle = sheen;
+    if (neonOn) {
+      const sheen = lctx.createLinearGradient(cx - scale, cy - scale, cx + scale, cy + scale);
+      sheen.addColorStop(0, "#13e58a");
+      sheen.addColorStop(0.5, "#0fd6a6");
+      sheen.addColorStop(1, "#2fb6ff");
+      lctx.fillStyle = sheen;
+    } else {
+      lctx.fillStyle = "#7fbfe0"; // plain sky blue when neon is off
+    }
     lctx.fill();
 
     lctx.beginPath();
     lpath(land);
     lctx.lineWidth = Math.max(0.6, scale * 0.0018);
-    lctx.strokeStyle = "rgba(170, 255, 225, 0.95)";
+    lctx.strokeStyle = neonOn ? "rgba(170, 255, 225, 0.95)" : "rgba(210, 235, 250, 0.9)";
     lctx.stroke();
 
-    // Country borders — thin fluorescent purple neon lines.
+    // Country borders.
     if (borders) {
       lctx.beginPath();
       lpath(borders);
       lctx.lineWidth = Math.max(0.7, scale * 0.0014);
-      lctx.strokeStyle = "rgba(206, 138, 255, 0.95)";
+      lctx.strokeStyle = neonOn ? "rgba(206, 138, 255, 0.95)" : "rgba(150, 180, 210, 0.8)";
       lctx.stroke();
     }
 
-    // Bloom: composite a blurred copy with additive blending (one raster blur),
-    // then the sharp copy on top.
-    const blur = Math.max(4, Math.min(14, scale * 0.018)); // cap so deep zoom stays fast
     ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    if ("filter" in ctx) {
-      ctx.filter = "blur(" + blur.toFixed(1) + "px)";
-      ctx.globalAlpha = 0.85;
+    if (neonOn) {
+      // Bloom: additive blurred copy + sharp copy on top.
+      ctx.globalCompositeOperation = "lighter";
+      const blur = Math.max(4, Math.min(14, scale * 0.018)); // cap so deep zoom stays fast
+      if ("filter" in ctx) {
+        ctx.filter = "blur(" + blur.toFixed(1) + "px)";
+        ctx.globalAlpha = 0.85;
+        ctx.drawImage(layer, 0, 0, width, height);
+        ctx.filter = "none";
+      }
+      ctx.globalAlpha = 1;
       ctx.drawImage(layer, 0, 0, width, height);
-      ctx.filter = "none";
+    } else {
+      // Flat: no glow, just the sharp land.
+      ctx.drawImage(layer, 0, 0, width, height);
     }
-    ctx.globalAlpha = 1;
-    ctx.drawImage(layer, 0, 0, width, height);
     ctx.restore();
   }
 
@@ -888,6 +970,7 @@
       chk.addEventListener("click", (e) => e.stopPropagation());
       chk.addEventListener("change", () => {
         if (chk.checked) cties.forEach((n) => sel.add(n)); else cties.forEach((n) => sel.delete(n));
+        focusRoute = null; focusCountry = null; hideRoutePopup();
         applyFilter(); refreshUI();
       });
       item.appendChild(chk);
@@ -912,6 +995,7 @@
       cb.type = "checkbox"; cb.checked = sel.has(name);
       cb.addEventListener("change", () => {
         if (cb.checked) sel.add(name); else sel.delete(name);
+        focusRoute = null; focusCountry = null; hideRoutePopup();
         applyFilter(); refreshLegendsOnly();
       });
       const sw = document.createElement("input");
@@ -921,17 +1005,25 @@
       sw.addEventListener("input", () => { countryRGB[name] = hexToRgb(sw.value); });
       const nm = document.createElement("span");
       nm.className = "cp-cty"; nm.textContent = koName(name);
-      const sub = document.createElement("div");
-      sub.className = "cp-air"; sub.hidden = true;
-      const aps = [...(tree.get(name) || [])].map((i) => airports[i])
-        .sort((a, b) => (b ? 0 : 0));
-      sub.innerHTML = aps.map((a) => "· " + (a.iata ? a.iata + " " : "") + a.name).join("<br>") || "공항 정보 없음";
-      nm.addEventListener("click", () => { sub.hidden = !sub.hidden; });
+      nm.title = "클릭: 항공 흐름 분석 + 공항 목록";
+      nm.addEventListener("click", () => { focusCountry = name; buildSummary(); showAirportWindow(name); });
       row.appendChild(cb); row.appendChild(sw); row.appendChild(nm);
       list.appendChild(row);
-      list.appendChild(sub);
     }
     panel.hidden = false;
+  }
+
+  // Separate window listing a country's airports (item: 공항 이름 별도 창).
+  function showAirportWindow(name) {
+    const win = document.getElementById("airportwin");
+    if (!win) return;
+    document.getElementById("aw-title").textContent = koName(name) + " 공항";
+    const list = (countryAirports[name] || []).map((i) => airports[i])
+      .sort((a, b) => (a.iata || "").localeCompare(b.iata || ""));
+    document.getElementById("aw-list").innerHTML =
+      list.map((a) => '<div class="aw-row"><b>' + (a.iata || "—") + "</b> " + a.name + "</div>").join("")
+      || '<div class="aw-row">공항 정보 없음</div>';
+    win.hidden = false;
   }
 
   function refreshLegendsOnly() { buildLegends(); }
@@ -940,7 +1032,23 @@
   const cpCloseBtn = document.getElementById("cp-close");
   if (cpCloseBtn) cpCloseBtn.addEventListener("click", () => {
     document.getElementById("countrypanel").hidden = true;
+    const aw = document.getElementById("airportwin"); if (aw) aw.hidden = true;
     curPanel = null; buildLegends();
+  });
+  const awCloseBtn = document.getElementById("aw-close");
+  if (awCloseBtn) awCloseBtn.addEventListener("click", () => { document.getElementById("airportwin").hidden = true; });
+
+  // Bottom-left: neon toggle + always-show-airports.
+  const elNeon = document.getElementById("neon-toggle");
+  if (elNeon) elNeon.addEventListener("click", () => {
+    neonOn = !neonOn;
+    elNeon.classList.toggle("off", !neonOn);
+    elNeon.textContent = neonOn ? "네온효과: 켜짐" : "네온효과: 꺼짐";
+  });
+  const elAlwaysAir = document.getElementById("always-airports");
+  if (elAlwaysAir) elAlwaysAir.addEventListener("change", () => {
+    alwaysAirports = elAlwaysAir.checked;
+    computeMarks();
   });
 
   // ---- route click → record-count popup ----------------------------------
@@ -953,22 +1061,32 @@
   }
 
   function routeClick(x, y) {
-    if (liveMode || !shown.length) { hideRoutePopup(); return; }
+    if (liveMode || !shown.length) return;
     const rot = projection.rotate();
     const center = [-rot[0], -rot[1]];
     const horizon = Math.PI / 2 - 0.02;
-    let best = null, bestD = 9;
+    let bestRi = null, bestD = 9;
     for (const ri of shown) {
-      const r = routes[ri];
-      const pts = r.lineCoords;
+      const pts = routes[ri].lineCoords;
       for (let i = 0; i < pts.length - 1; i++) {
         if (d3.geoDistance(pts[i], center) > horizon || d3.geoDistance(pts[i + 1], center) > horizon) continue;
         const pa = projection(pts[i]), pb = projection(pts[i + 1]);
         const d = segDist(x, y, pa[0], pa[1], pb[0], pb[1]);
-        if (d < bestD) { bestD = d; best = r; }
+        if (d < bestD) { bestD = d; bestRi = ri; }
       }
     }
-    if (best) showRoutePopup(x, y, best); else hideRoutePopup();
+    if (bestRi != null) {
+      // Focus the clicked route: only that route, ≤5 planes.
+      focusRoute = bestRi; focusCountry = null;
+      maxPlanes = selectionCap();
+      rebuildShown(); computeMarks(); buildSummary();
+      if (daily && !liveMode) setPlaneCount(Math.round((daily.counts[dayIndex] / maxCount) * maxPlanes));
+      showRoutePopup(0, 0, routes[bestRi]);
+    } else if (focusRoute != null) {
+      focusRoute = null; hideRoutePopup(); applyFilter();
+    } else {
+      hideRoutePopup();
+    }
   }
 
   function showRoutePopup(x, y, r) {
@@ -1028,7 +1146,7 @@
       console.error("Failed to load map data:", err);
     });
 
-  fetch("routes.json?v=4")
+  fetch("routes.json?v=5")
     .then((r) => r.json())
     .then((d) => {
       buildRoutes(d);

@@ -55,7 +55,7 @@ html, body {
 #hint {
   position: fixed;
   left: 18px;
-  bottom: 24px;
+  bottom: 124px;
   z-index: 10;
   font-size: 13px;
   letter-spacing: 0.3px;
@@ -308,6 +308,68 @@ html, body {
 .sum-k { flex: 0 0 78px; color: rgba(170, 190, 255, 0.7); }
 .sum-v { flex: 1 1 auto; color: #dfe9ff; }
 
+#airportwin {
+  position: fixed;
+  left: 420px;
+  top: 18px;
+  z-index: 11;
+  width: 210px;
+  max-height: 78vh;
+  overflow: auto;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(120, 160, 255, 0.3);
+  background: rgba(16, 13, 38, 0.85);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 0 24px rgba(80, 120, 255, 0.22);
+  color: #cfe3ff;
+  font-size: 12px;
+}
+#airportwin[hidden] { display: none; }
+#aw-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+#aw-title { font-size: 13px; font-weight: 600; color: #8ffcff; }
+#aw-close {
+  width: 22px; height: 22px; border-radius: 6px;
+  border: 1px solid rgba(120, 160, 255, 0.3);
+  background: transparent; color: #9fb6ff; cursor: pointer; font-size: 11px;
+}
+#aw-close:hover { color: #fff; border-color: rgba(255, 110, 140, 0.6); }
+.aw-row { padding: 2px 0; line-height: 1.45; color: rgba(200, 215, 255, 0.85); }
+.aw-row b { color: #7df9ff; margin-right: 5px; }
+
+#fxpanel {
+  position: fixed;
+  left: 18px;
+  bottom: 22px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(120, 160, 255, 0.28);
+  background: rgba(16, 13, 38, 0.55);
+  backdrop-filter: blur(8px);
+}
+#neon-toggle {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 9px;
+  border: 1px solid rgba(120, 255, 200, 0.5);
+  background: rgba(20, 40, 36, 0.5);
+  color: #8effd6;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+#neon-toggle:hover { box-shadow: 0 0 14px rgba(80, 255, 180, 0.4); }
+#neon-toggle.off { border-color: rgba(150, 170, 200, 0.4); background: rgba(30, 34, 44, 0.5); color: #aebdd4; box-shadow: none; }
+#airport-always-label {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12px; color: rgba(200, 212, 255, 0.85); cursor: pointer;
+}
+#airport-always-label input { width: 15px; height: 15px; accent-color: #5df9ff; cursor: pointer; }
+
 #routepop {
   position: fixed;
   top: 18px;
@@ -344,5 +406,9 @@ html, body {
   #rocount { font-size: 11px; }
   #summary { top: 8px; width: calc(100vw - 20px); padding: 9px 12px; }
   #sum-row, .sum-row { font-size: 11px; }
-  #routepop { top: auto; bottom: 90px; right: 10px; max-width: calc(100vw - 20px); }
+  #routepop { top: auto; bottom: 96px; right: 10px; max-width: calc(100vw - 20px); }
+  #airportwin { left: auto; right: 10px; top: 92px; width: 150px; }
+  #fxpanel { left: 10px; bottom: 100px; padding: 8px 10px; gap: 6px; }
+  #neon-toggle { height: 28px; font-size: 11px; }
+  #airport-always-label { font-size: 11px; }
 }
