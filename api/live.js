@@ -63,7 +63,7 @@ module.exports = async function handler(req, res) {
     const tok = await getToken();
     const headers = tok ? { Authorization: "Bearer " + tok } : {};
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 9000);
+    const timer = setTimeout(() => ctrl.abort(), 25000);
     const r = await fetch(STATES_URL, { headers, signal: ctrl.signal });
     clearTimeout(timer);
     if (!r.ok) throw new Error("opensky " + r.status);
