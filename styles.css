@@ -71,21 +71,22 @@ html, body {
   transform: translateX(-50%);
   z-index: 10;
   display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 16px;
-  width: min(560px, calc(100vw - 36px));
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 16px;
+  width: min(620px, calc(100vw - 28px));
   border-radius: 16px;
   border: 1px solid rgba(120, 160, 255, 0.3);
-  background: rgba(16, 13, 38, 0.55);
+  background: rgba(16, 13, 38, 0.6);
   backdrop-filter: blur(10px);
   box-shadow: 0 0 22px rgba(80, 120, 255, 0.18);
 }
+.fb-row { display: flex; align-items: center; gap: 12px; }
+.fb-row2 { gap: 10px; }
 
 #play {
   flex: 0 0 auto;
-  width: 38px;
-  height: 38px;
+  width: 38px; height: 38px;
   border-radius: 10px;
   border: 1px solid rgba(120, 160, 255, 0.35);
   background: rgba(30, 24, 60, 0.5);
@@ -122,38 +123,14 @@ html, body {
 }
 @keyframes livepulse { 0%,100% { box-shadow: 0 0 12px rgba(255,70,110,0.4); } 50% { box-shadow: 0 0 22px rgba(255,70,110,0.8); } }
 
-#flightbar.liveon #slidewrap #dateslider { opacity: 0.35; pointer-events: none; }
-#flightbar.liveon #play { opacity: 0.35; pointer-events: none; }
-
-#legend {
-  position: fixed;
-  left: 18px;
-  top: 18px;
-  z-index: 10;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  border: 1px solid rgba(120, 160, 255, 0.25);
-  background: rgba(16, 13, 38, 0.5);
-  backdrop-filter: blur(8px);
-  font-size: 12px;
-  color: rgba(200, 212, 255, 0.85);
-}
-#legend .lg-title { font-size: 11px; color: rgba(170, 190, 255, 0.7); margin-bottom: 2px; }
-#legend span { display: flex; align-items: center; gap: 7px; }
-#legend i {
-  width: 10px; height: 10px; border-radius: 3px; display: inline-block;
-  box-shadow: 0 0 8px currentColor;
-}
-
-#slidewrap { flex: 1 1 auto; display: flex; flex-direction: column; gap: 6px; }
+#flightbar.liveon #dateslider,
+#flightbar.liveon #play,
+#flightbar.liveon #datepick { opacity: 0.35; pointer-events: none; }
 
 #dateslider {
   -webkit-appearance: none;
   appearance: none;
-  width: 100%;
+  flex: 1 1 auto;
   height: 5px;
   border-radius: 3px;
   background: linear-gradient(90deg, rgba(120,90,255,0.5), rgba(60,240,255,0.7));
@@ -163,8 +140,7 @@ html, body {
 #dateslider::-webkit-slider-thumb {
   -webkit-appearance: none;
   width: 16px; height: 16px; border-radius: 50%;
-  background: #eafcff;
-  border: 2px solid #5df9ff;
+  background: #eafcff; border: 2px solid #5df9ff;
   box-shadow: 0 0 10px rgba(93, 249, 255, 0.8);
   cursor: pointer;
 }
@@ -175,30 +151,125 @@ html, body {
   cursor: pointer;
 }
 
-#readout {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  font-size: 13px;
-  color: rgba(190, 205, 255, 0.85);
+#datepick {
+  flex: 0 0 auto;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(120, 160, 255, 0.35);
+  background: rgba(30, 24, 60, 0.5);
+  color: #cfe3ff;
+  font-size: 12px;
+  cursor: pointer;
+  color-scheme: dark;
 }
-#rodate { font-weight: 500; color: #cfe3ff; }
-#rocount { color: #7df9ff; text-shadow: 0 0 10px rgba(93, 249, 255, 0.5); }
-#romodeled {
+
+#speeds { display: flex; gap: 4px; flex: 0 0 auto; }
+#speeds button {
+  width: 34px; height: 30px;
+  border-radius: 8px;
+  border: 1px solid rgba(120, 160, 255, 0.3);
+  background: rgba(30, 24, 60, 0.45);
+  color: #9fb6ff;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+#speeds button:hover { border-color: rgba(120, 255, 200, 0.6); }
+#speeds button.on {
+  background: rgba(60, 240, 255, 0.18);
+  color: #8ffcff;
+  border-color: rgba(93, 249, 255, 0.8);
+  box-shadow: 0 0 10px rgba(93, 249, 255, 0.4);
+}
+
+#rocount {
   margin-left: auto;
+  font-size: 12px;
+  color: #7df9ff;
+  text-shadow: 0 0 10px rgba(93, 249, 255, 0.5);
+  white-space: nowrap;
+}
+#romodeled {
+  flex: 0 0 auto;
   font-size: 11px;
   color: rgba(200, 150, 255, 0.75);
   border: 1px solid rgba(200, 150, 255, 0.35);
   border-radius: 6px;
   padding: 1px 6px;
   cursor: help;
+  white-space: nowrap;
 }
 
-@media (max-width: 540px) {
+#legend {
+  position: fixed;
+  left: 18px;
+  top: 18px;
+  z-index: 10;
+  width: 158px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(120, 160, 255, 0.25);
+  background: rgba(16, 13, 38, 0.55);
+  backdrop-filter: blur(8px);
+  font-size: 12px;
+  color: rgba(200, 212, 255, 0.85);
+}
+.lg-title { font-size: 11px; color: rgba(170, 190, 255, 0.7); margin-bottom: 6px; }
+#legend-items { display: flex; flex-direction: column; gap: 3px; }
+.lg-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 3px 5px; border-radius: 7px;
+  cursor: pointer; transition: background 0.12s ease;
+}
+.lg-item:hover { background: rgba(120, 160, 255, 0.12); }
+.lg-item.off { opacity: 0.4; }
+.lg-item i { width: 10px; height: 10px; border-radius: 3px; box-shadow: 0 0 8px currentColor; flex: 0 0 auto; }
+.lg-item .lg-name { flex: 1 1 auto; }
+.lg-item .lg-chk { width: 14px; height: 14px; accent-color: #5df9ff; cursor: pointer; flex: 0 0 auto; }
+
+#contpanel {
+  position: fixed;
+  right: 18px;
+  top: 18px;
+  z-index: 11;
+  width: 200px;
+  max-height: 72vh;
+  overflow: auto;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(120, 160, 255, 0.3);
+  background: rgba(16, 13, 38, 0.72);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 0 24px rgba(80, 120, 255, 0.22);
+  color: #cfe3ff;
+  font-size: 13px;
+}
+#contpanel[hidden] { display: none; }
+#cp-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+#cp-title { font-size: 14px; font-weight: 600; color: #dfe9ff; }
+#cp-close {
+  width: 24px; height: 24px; border-radius: 6px;
+  border: 1px solid rgba(120, 160, 255, 0.3);
+  background: transparent; color: #9fb6ff; cursor: pointer; font-size: 12px;
+}
+#cp-close:hover { color: #fff; border-color: rgba(255, 110, 140, 0.6); }
+#cp-list { display: flex; flex-direction: column; gap: 4px; }
+.cp-row { display: flex; align-items: center; gap: 8px; padding: 3px 4px; border-radius: 6px; cursor: pointer; }
+.cp-row:hover { background: rgba(120, 160, 255, 0.1); }
+.cp-row input { width: 14px; height: 14px; accent-color: #5df9ff; cursor: pointer; }
+.cp-row i { width: 9px; height: 9px; border-radius: 2px; box-shadow: 0 0 6px currentColor; }
+.cp-empty { color: rgba(190, 205, 255, 0.6); font-size: 12px; }
+.cp-foot { margin-top: 8px; font-size: 11px; color: rgba(170, 190, 255, 0.55); line-height: 1.4; }
+
+@media (max-width: 560px) {
   #hint { display: none; }
-  #controls { right: 12px; bottom: 84px; }
-  #flightbar { bottom: 14px; padding: 9px 10px; gap: 8px; }
-  #readout { font-size: 12px; gap: 7px; }
+  #controls { right: 12px; bottom: 124px; }
+  #flightbar { bottom: 12px; padding: 10px 12px; width: calc(100vw - 20px); gap: 8px; }
+  #legend { left: 10px; top: 10px; width: 128px; padding: 8px 10px; font-size: 11px; }
+  #contpanel { right: 10px; top: 10px; width: 158px; font-size: 12px; }
   #live { padding: 0 9px; font-size: 11px; }
-  #legend { left: 12px; top: 12px; padding: 8px 10px; font-size: 11px; gap: 5px; }
+  #datepick { font-size: 11px; }
+  #speeds button { width: 30px; height: 28px; }
+  #rocount { font-size: 11px; }
 }

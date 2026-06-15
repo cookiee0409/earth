@@ -18,26 +18,36 @@
 
   <div id="hint">드래그로 돌리기 · 휠 또는 ± 버튼으로 확대·축소</div>
 
-  <div id="legend" aria-hidden="true">
-    <span class="lg-title">대륙별 색상</span>
-    <span><i style="background:#5dff9b"></i>북미</span>
-    <span><i style="background:#ff8a4d"></i>남미</span>
-    <span><i style="background:#5df9ff"></i>유럽</span>
-    <span><i style="background:#ffd25d"></i>아프리카</span>
-    <span><i style="background:#ff5dd2"></i>아시아</span>
-    <span><i style="background:#b98aff"></i>오세아니아</span>
+  <div id="legend">
+    <div class="lg-title">대륙 · 클릭하면 국가</div>
+    <div id="legend-items"></div>
+  </div>
+
+  <div id="contpanel" hidden>
+    <div id="cp-head">
+      <span id="cp-title"></span>
+      <button id="cp-close" aria-label="닫기">✕</button>
+    </div>
+    <div id="cp-list"></div>
+    <div class="cp-foot">체크를 끄면 해당 국가 항공편이 숨겨집니다</div>
   </div>
 
   <div id="flightbar">
-    <button id="live" aria-label="실시간 실측 데이터 전환" title="OpenSky 실시간 항공기">LIVE</button>
-    <button id="play" aria-label="날짜 자동 재생/일시정지" title="재생/일시정지">▶</button>
-    <div id="slidewrap">
+    <div class="fb-row">
+      <button id="live" aria-label="실시간 실측 데이터 전환" title="adsb.lol 실시간 항공기">LIVE</button>
+      <button id="play" aria-label="날짜 자동 재생/일시정지" title="재생/일시정지">▶</button>
       <input type="range" id="dateslider" min="0" max="0" value="0" aria-label="날짜 선택" />
-      <div id="readout">
-        <span id="rodate">—</span>
-        <span id="rocount">—</span>
-        <span id="romodeled" title="실측이 아닌 대표값(모델) 데이터입니다">대표값</span>
+    </div>
+    <div class="fb-row fb-row2">
+      <input type="date" id="datepick" aria-label="날짜 직접 입력" />
+      <div id="speeds" role="group" aria-label="재생 속도">
+        <button data-sp="1" class="on">1×</button>
+        <button data-sp="2">2×</button>
+        <button data-sp="4">4×</button>
+        <button data-sp="8">8×</button>
       </div>
+      <span id="rocount">—</span>
+      <span id="romodeled" title="실측이 아닌 대표값(모델) 데이터입니다">대표값</span>
     </div>
   </div>
 

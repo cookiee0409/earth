@@ -11,7 +11,9 @@ const fs = require("fs");
 const path = require("path");
 
 const START = new Date(Date.UTC(2019, 0, 1));
-const END = new Date(Date.UTC(2025, 11, 31));
+// Through today (UTC) — the modeled history is only meaningful up to "now".
+const now = new Date();
+const END = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 
 function smoothstep(a, b, x) {
   const t = Math.max(0, Math.min(1, (x - a) / (b - a)));

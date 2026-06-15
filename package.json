@@ -7,5 +7,9 @@
     "dev": "npx serve .",
     "start": "npx serve ."
   },
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "d3-geo": "^3.1.1",
+    "topojson-client": "^3.1.0"
+  }
 }

@@ -59,15 +59,66 @@
 
   function continentOf(lon, lat) {
     if (lat < -60) return 6;
-    if (lon >= -93 && lon <= -32 && lat >= -57 && lat <= 14) return 4;
-    if (lon >= -170 && lon <= -50 && lat > 14 && lat <= 84) return 3;
-    if (lon >= -130 && lon <= -58 && lat >= 7 && lat <= 33) return 3;
-    if (lon >= -25 && lon <= 40 && lat >= 36 && lat <= 72) return 1;
-    if (lon >= -20 && lon <= 52 && lat >= -37 && lat < 36) return 2;
-    if (lon >= 110 && lon <= 180 && lat >= -50 && lat <= 0) return 5;
-    if (lon >= 40 && lon <= 180 && lat >= -10 && lat <= 82) return 0;
-    if (lon >= 25 && lon < 40 && lat >= 36) return 0;
+    if (lon >= -93 && lon <= -32 && lat >= -57 && lat <= 14) return 4; // S.America
+    if (lon >= -170 && lon <= -50 && lat > 14 && lat <= 84) return 3;  // N.America
+    if (lon >= -130 && lon <= -58 && lat >= 7 && lat <= 33) return 3;  // Central America
+    if (lon >= 110 && lon <= 180 && lat >= -50 && lat <= 0) return 5;  // Oceania
+    if (lon >= -25 && lon <= 45 && lat >= 34 && lat <= 72) return 1;   // Europe
+    if (lon >= 34 && lon <= 63 && lat >= 12 && lat < 40) return 0;     // Middle East -> Asia
+    if (lon >= -20 && lon <= 52 && lat >= -37 && lat < 34) return 2;   // Africa
+    if (lon >= 40 && lon <= 180 && lat >= -10 && lat <= 82) return 0;  // Asia
     return 6;
+  }
+
+  // ---- filters & metadata -------------------------------------------------
+  let routeCountries = [];   // index -> country name (from routes.json)
+  let byCont = {};           // continent index -> [country index, ...]
+  const contOff = new Set(); // disabled continents
+  const countryOff = new Set(); // disabled country names
+  let countryFeatures = null, countryBounds = null; // for live point-in-country
+
+  let speed = 1;             // playback speed multiplier
+  const BASE_MS_PER_DAY = 700; // slow by default (1×)
+
+  // Korean labels for the countries that appear in the panels.
+  const KO = {
+    "China": "중국", "India": "인도", "Japan": "일본", "Malaysia": "말레이시아",
+    "United Arab Emirates": "아랍에미리트", "Indonesia": "인도네시아", "Thailand": "태국",
+    "South Korea": "대한민국", "Saudi Arabia": "사우디아라비아", "Philippines": "필리핀",
+    "Spain": "스페인", "France": "프랑스", "Italy": "이탈리아", "Germany": "독일",
+    "Portugal": "포르투갈", "United Kingdom": "영국", "Turkey": "튀르키예", "Austria": "오스트리아",
+    "Greece": "그리스", "Belgium": "벨기에", "Netherlands": "네덜란드", "Switzerland": "스위스",
+    "Burkina Faso": "부르키나파소", "South Africa": "남아프리카공화국", "Ghana": "가나",
+    "Morocco": "모로코", "Ethiopia": "에티오피아", "Rwanda": "르완다", "Benin": "베냉",
+    "Senegal": "세네갈", "Burundi": "부룬디", "Tanzania": "탄자니아", "Egypt": "이집트",
+    "Kenya": "케냐", "Nigeria": "나이지리아", "Algeria": "알제리",
+    "United States of America": "미국", "Canada": "캐나다", "Mexico": "멕시코",
+    "Puerto Rico": "푸에르토리코", "Guatemala": "과테말라", "Haiti": "아이티",
+    "Dominican Rep.": "도미니카공화국", "Jamaica": "자메이카", "Honduras": "온두라스", "Cuba": "쿠바",
+    "Brazil": "브라질", "Colombia": "콜롬비아", "Peru": "페루", "Ecuador": "에콰도르",
+    "Chile": "칠레", "Venezuela": "베네수엘라", "Panama": "파나마", "El Salvador": "엘살바도르",
+    "Bolivia": "볼리비아", "Nicaragua": "니카라과", "Argentina": "아르헨티나",
+    "Australia": "호주", "New Zealand": "뉴질랜드", "Fiji": "피지", "Papua New Guinea": "파푸아뉴기니",
+  };
+  const koName = (n) => KO[n] || n;
+
+  function hidden(cont, country) {
+    if (contOff.has(cont)) return true;
+    if (country && countryOff.has(country)) return true;
+    return false;
+  }
+
+  // Point-in-country for live aircraft (countries-110m), with a bbox prefilter.
+  function countryOfLive(lon, lat) {
+    if (!countryFeatures) return null;
+    for (let i = 0; i < countryFeatures.length; i++) {
+      const b = countryBounds[i];
+      const w = b[0][0], s = b[0][1], e = b[1][0], n = b[1][1];
+      if (lat < s - 1 || lat > n + 1) continue;
+      if (w <= e && (lon < w - 1 || lon > e + 1)) continue;
+      if (d3.geoContains(countryFeatures[i], [lon, lat])) return countryFeatures[i].properties.name;
+    }
+    return null;
   }
 
   // Top-down plane silhouette pointing +x, given as the upper half outline.
@@ -82,13 +133,16 @@
   }
 
   function buildRoutes(data) {
+    routeCountries = data.countries || [];
+    byCont = data.byCont || {};
     routes = data.routes.map((a) => {
       const o = [a[0], a[1]], d = [a[2], a[3]];
       return {
         o, d, w: a[4],
         interp: d3.geoInterpolate(o, d),
         dist: Math.max(0.02, d3.geoDistance(o, d)),
-        cont: continentOf(a[0], a[1]),
+        cont: a[5] != null ? a[5] : continentOf(a[0], a[1]),
+        country: (a[6] != null && a[6] >= 0) ? routeCountries[a[6]] : null,
       };
     });
     computeCaps();
@@ -130,14 +184,14 @@
     if (planes.length > n) planes.length = n;
   }
 
-  function fmtDate(idx) {
+  function fmtISO(idx) {
     const d = new Date(START_MS + idx * DAY_MS);
     const p = (n) => String(n).padStart(2, "0");
-    return d.getUTCFullYear() + "." + p(d.getUTCMonth() + 1) + "." + p(d.getUTCDate());
+    return d.getUTCFullYear() + "-" + p(d.getUTCMonth() + 1) + "-" + p(d.getUTCDate());
   }
 
   const elSlider = document.getElementById("dateslider");
-  const elDate = document.getElementById("rodate");
+  const elDatePick = document.getElementById("datepick");
   const elCount = document.getElementById("rocount");
   const elPlay = document.getElementById("play");
   const elLive = document.getElementById("live");
@@ -148,7 +202,7 @@
     if (!daily) return;
     dayIndex = Math.max(0, Math.min(daily.counts.length - 1, idx | 0));
     elSlider.value = dayIndex;
-    elDate.textContent = fmtDate(dayIndex);
+    if (elDatePick) elDatePick.value = fmtISO(dayIndex);
     elCount.textContent = "약 " + daily.counts[dayIndex].toLocaleString("ko-KR") + "편";
     setPlaneCount(Math.round((daily.counts[dayIndex] / maxCount) * maxPlanes));
   }
@@ -163,11 +217,13 @@
         liveLoading = false;
         if (!liveMode) return;
         liveCount = d.count || 0;
-        livePlanes = (d.sample || []).map((s) => ({ lon: s[0], lat: s[1], track: s[2], vel: s[3], cont: s[4] }));
+        livePlanes = (d.sample || []).map((s) => ({
+          lon: s[0], lat: s[1], track: s[2], vel: s[3], cont: s[4],
+          country: countryOfLive(s[0], s[1]),
+        }));
         // cap to screen-based plane budget
         if (livePlanes.length > maxPlanes) livePlanes.length = maxPlanes;
-        elDate.textContent = "LIVE";
-        elCount.textContent = "실시간 " + liveCount.toLocaleString("ko-KR") + "대 추적 (ADS-B)";
+        elCount.textContent = "LIVE · " + liveCount.toLocaleString("ko-KR") + "대 추적 (ADS-B)";
       })
       .catch((err) => {
         liveLoading = false;
@@ -182,10 +238,11 @@
     elLive.classList.toggle("on", on);
     elLive.textContent = on ? "LIVE ●" : "LIVE";
     if (elBar) elBar.classList.toggle("liveon", on);
+    if (elDatePick) elDatePick.disabled = on;
     if (on) {
       playing = false; elPlay.textContent = "▶";
-      if (elModeled) { elModeled.textContent = "실측"; elModeled.title = "OpenSky Network 실시간 측정 데이터"; }
-      elDate.textContent = "LIVE"; elCount.textContent = "불러오는 중…";
+      if (elModeled) { elModeled.textContent = "실측"; elModeled.title = "adsb.lol 실시간 측정 데이터 (ADS-B)"; }
+      elCount.textContent = "불러오는 중…";
       fetchLive();
       if (liveTimer) clearInterval(liveTimer);
       liveTimer = setInterval(fetchLive, 18000);
@@ -213,7 +270,7 @@
     const rot = projection.rotate();
     const center = [-rot[0], -rot[1]];
     const horizon = Math.PI / 2 - 0.02;
-    const glyphScale = Math.max(0.5, Math.min(2.4, scale * 0.0034));
+    const glyphScale = Math.max(0.25, Math.min(1.2, scale * 0.0017));
 
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
@@ -224,6 +281,7 @@
       pl.t += pl.sp;
       if (pl.t >= 1) { respawn(pl); continue; }
       const r = routes[pl.ri];
+      if (hidden(r.cont, r.country)) continue;
       const head = r.interp(pl.t);
       if (d3.geoDistance(head, center) > horizon) continue;
       ctx.strokeStyle = CONT_TRAIL[r.cont];
@@ -244,6 +302,7 @@
 
     for (const pl of planes) {
       const r = routes[pl.ri];
+      if (hidden(r.cont, r.country)) continue;
       const head = r.interp(pl.t);
       if (d3.geoDistance(head, center) > horizon) continue;
       const p0 = projection(head);
@@ -265,13 +324,14 @@
     const rot = projection.rotate();
     const center = [-rot[0], -rot[1]];
     const horizon = Math.PI / 2 - 0.02;
-    const glyphScale = Math.max(0.5, Math.min(2.4, scale * 0.0034));
+    const glyphScale = Math.max(0.25, Math.min(1.2, scale * 0.0017));
     const secs = Math.min(0.1, (dt || 16) / 1000); // dead-reckon step, clamped
 
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
     for (const pl of livePlanes) {
       if (pl.vel > 0) { const np = destination(pl.lon, pl.lat, pl.track, pl.vel * secs); pl.lon = np[0]; pl.lat = np[1]; }
+      if (hidden(pl.cont, pl.country)) continue;
       const pos = [pl.lon, pl.lat];
       if (d3.geoDistance(pos, center) > horizon) continue;
       const p0 = projection(pos);
@@ -493,7 +553,7 @@
     lastSpin = t;
     if (playing && daily) {
       playAccum += dt;
-      const msPerDay = 45;
+      const msPerDay = BASE_MS_PER_DAY / speed;
       while (playAccum >= msPerDay) {
         playAccum -= msPerDay;
         setDay(dayIndex + 1 >= daily.counts.length ? 0 : dayIndex + 1);
@@ -594,6 +654,79 @@
   });
   if (elLive) elLive.addEventListener("click", () => setLiveMode(!liveMode));
 
+  if (elDatePick) {
+    elDatePick.addEventListener("change", () => {
+      if (liveMode || !daily) return;
+      const t = Date.parse(elDatePick.value + "T00:00:00Z");
+      if (!isNaN(t)) setDay(Math.round((t - START_MS) / DAY_MS));
+    });
+  }
+
+  // Speed buttons (1× / 2× / 4× / 8×).
+  document.querySelectorAll("#speeds button").forEach((b) => {
+    b.addEventListener("click", () => {
+      speed = +b.dataset.sp;
+      document.querySelectorAll("#speeds button").forEach((x) => x.classList.toggle("on", x === b));
+    });
+  });
+
+  // Continent legend + country panel.
+  const LEGEND_ORDER = [3, 4, 1, 2, 0, 5];
+  function buildLegend() {
+    const host = document.getElementById("legend-items");
+    if (!host) return;
+    host.innerHTML = "";
+    for (const c of LEGEND_ORDER) {
+      const item = document.createElement("div");
+      item.className = "lg-item";
+      item.innerHTML = '<i style="background:' + CONT_FILL[c] + ";color:" + CONT_FILL[c] + '"></i><span class="lg-name">' + CONT_NAME[c] + "</span>";
+      const chk = document.createElement("input");
+      chk.type = "checkbox"; chk.className = "lg-chk"; chk.checked = !contOff.has(c);
+      chk.title = "이 대륙 표시 켜기/끄기";
+      chk.addEventListener("click", (e) => e.stopPropagation());
+      chk.addEventListener("change", () => {
+        if (chk.checked) contOff.delete(c); else contOff.add(c);
+        item.classList.toggle("off", !chk.checked);
+      });
+      item.appendChild(chk);
+      item.addEventListener("click", () => openPanel(c));
+      host.appendChild(item);
+    }
+  }
+
+  function openPanel(c) {
+    const panel = document.getElementById("contpanel");
+    if (!panel) return;
+    document.getElementById("cp-title").textContent = CONT_NAME[c] + " 주요 국가";
+    const list = document.getElementById("cp-list");
+    list.innerHTML = "";
+    const arr = (byCont && byCont[c]) || [];
+    if (!arr.length) {
+      list.innerHTML = '<div class="cp-empty">표시할 국가가 없습니다</div>';
+    }
+    for (const ci of arr) {
+      const name = routeCountries[ci];
+      if (!name) continue;
+      const row = document.createElement("label");
+      row.className = "cp-row";
+      const cb = document.createElement("input");
+      cb.type = "checkbox"; cb.checked = !countryOff.has(name);
+      cb.addEventListener("change", () => {
+        if (cb.checked) countryOff.delete(name); else countryOff.add(name);
+      });
+      const sw = document.createElement("i");
+      sw.style.background = CONT_FILL[c];
+      sw.style.color = CONT_FILL[c];
+      const sp = document.createElement("span");
+      sp.textContent = koName(name);
+      row.appendChild(cb); row.appendChild(sw); row.appendChild(sp);
+      list.appendChild(row);
+    }
+    panel.hidden = false;
+  }
+  const cpClose = document.getElementById("cp-close");
+  if (cpClose) cpClose.addEventListener("click", () => { document.getElementById("contpanel").hidden = true; });
+
   window.addEventListener("resize", resize);
 
   // ---- boot ---------------------------------------------------------------
@@ -612,6 +745,9 @@
       land = topojson.feature(topo, topo.objects.land);
       // Interior borders only (shared edges), so coastlines aren't doubled.
       borders = topojson.mesh(topo, topo.objects.countries, (a, b) => a !== b);
+      // Country polygons for live point-in-country lookup.
+      countryFeatures = topojson.feature(topo, topo.objects.countries).features;
+      countryBounds = countryFeatures.map((f) => d3.geoBounds(f));
     })
     .catch((err) => {
       console.error("Failed to load map data:", err);
@@ -619,7 +755,7 @@
 
   fetch("routes.json")
     .then((r) => r.json())
-    .then((d) => { buildRoutes(d); if (daily) setDay(dayIndex); })
+    .then((d) => { buildRoutes(d); buildLegend(); if (daily) setDay(dayIndex); })
     .catch((err) => { console.error("Failed to load routes:", err); });
 
   fetch("daily.json")
@@ -628,6 +764,7 @@
       daily = d;
       maxCount = d.counts.reduce((m, c) => (c > m ? c : m), 1);
       elSlider.max = d.counts.length - 1;
+      if (elDatePick) { elDatePick.min = fmtISO(0); elDatePick.max = fmtISO(d.counts.length - 1); }
       setDay(d.counts.length - 1); // start at the most recent day
     })
     .catch((err) => { console.error("Failed to load daily data:", err); });

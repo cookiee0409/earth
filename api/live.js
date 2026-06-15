@@ -48,11 +48,11 @@ function continentOf(lon, lat) {
   if (lon >= -93 && lon <= -32 && lat >= -57 && lat <= 14) return 4;
   if (lon >= -170 && lon <= -50 && lat > 14 && lat <= 84) return 3;
   if (lon >= -130 && lon <= -58 && lat >= 7 && lat <= 33) return 3;
-  if (lon >= -25 && lon <= 40 && lat >= 36 && lat <= 72) return 1;
-  if (lon >= -20 && lon <= 52 && lat >= -37 && lat < 36) return 2;
   if (lon >= 110 && lon <= 180 && lat >= -50 && lat <= 0) return 5;
+  if (lon >= -25 && lon <= 45 && lat >= 34 && lat <= 72) return 1;
+  if (lon >= 34 && lon <= 63 && lat >= 12 && lat < 40) return 0;
+  if (lon >= -20 && lon <= 52 && lat >= -37 && lat < 34) return 2;
   if (lon >= 40 && lon <= 180 && lat >= -10 && lat <= 82) return 0;
-  if (lon >= 25 && lon < 40 && lat >= 36) return 0;
   return 6;
 }
 
