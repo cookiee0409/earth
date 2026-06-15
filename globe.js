@@ -27,18 +27,48 @@
   let autoSpin = true;
   let lastSpin = performance.now();
   let lastFrame = performance.now();
+  let frameDt = 16;
 
   // ---- flights ------------------------------------------------------------
-  let routes = [];          // [{o,d,w,interp,dist}]
+  let routes = [];          // full list, sorted by weight: [{o,d,w,interp,dist,cont}]
+  let activeN = 0;          // routes currently in use (scales with screen size)
   let cumW = [], totalW = 0;
   let daily = null;         // { start, counts:[...] }
   let dayIndex = 0, maxCount = 1;
   let playing = false, playAccum = 0;
   let planes = [];
-  const MAX_PLANES = 420;
+  let maxPlanes = 420;      // plane cap (scales with screen size)
   const SPEED_K = 0.0011;   // angular speed = K / route-length (constant ground speed)
   const DAY_MS = 86400000;
   const START_MS = Date.UTC(2019, 0, 1);
+
+  // Live (measured) mode — real aircraft from OpenSky via /api/live.
+  let liveMode = false;
+  let livePlanes = [];      // [{lon,lat,track,vel,cont}]
+  let liveCount = 0, liveTimer = null, liveLoading = false;
+
+  // ---- continents (color by departure / current position) -----------------
+  // 0 Asia, 1 Europe, 2 Africa, 3 N.America, 4 S.America, 5 Oceania, 6 Other
+  const CONT_RGB = [
+    [255, 93, 210], [93, 249, 255], [255, 210, 93],
+    [93, 255, 155], [255, 138, 77], [185, 138, 255], [234, 252, 255],
+  ];
+  const CONT_NAME = ["아시아", "유럽", "아프리카", "북미", "남미", "오세아니아", "기타"];
+  const CONT_FILL = CONT_RGB.map((c) => `rgb(${c[0]},${c[1]},${c[2]})`);
+  const CONT_TRAIL = CONT_RGB.map((c) => `rgba(${c[0]},${c[1]},${c[2]},0.34)`);
+
+  function continentOf(lon, lat) {
+    if (lat < -60) return 6;
+    if (lon >= -93 && lon <= -32 && lat >= -57 && lat <= 14) return 4;
+    if (lon >= -170 && lon <= -50 && lat > 14 && lat <= 84) return 3;
+    if (lon >= -130 && lon <= -58 && lat >= 7 && lat <= 33) return 3;
+    if (lon >= -25 && lon <= 40 && lat >= 36 && lat <= 72) return 1;
+    if (lon >= -20 && lon <= 52 && lat >= -37 && lat < 36) return 2;
+    if (lon >= 110 && lon <= 180 && lat >= -50 && lat <= 0) return 5;
+    if (lon >= 40 && lon <= 180 && lat >= -10 && lat <= 82) return 0;
+    if (lon >= 25 && lon < 40 && lat >= 36) return 0;
+    return 6;
+  }
 
   // Top-down plane silhouette pointing +x, given as the upper half outline.
   const PLANE_HALF = [[9,0],[2,1.4],[2,2.2],[-1,7],[-2.6,7],[-2,2.2],[-4.6,2.2],[-5.2,4.6],[-6.8,4.6],[-6,1.1],[-8,0]];
@@ -54,10 +84,30 @@
   function buildRoutes(data) {
     routes = data.routes.map((a) => {
       const o = [a[0], a[1]], d = [a[2], a[3]];
-      return { o, d, w: a[4], interp: d3.geoInterpolate(o, d), dist: Math.max(0.02, d3.geoDistance(o, d)) };
+      return {
+        o, d, w: a[4],
+        interp: d3.geoInterpolate(o, d),
+        dist: Math.max(0.02, d3.geoDistance(o, d)),
+        cont: continentOf(a[0], a[1]),
+      };
     });
+    computeCaps();
+    rebuildActive();
+  }
+
+  // Scale route count and plane cap to the viewport (1280×720 ≈ baseline).
+  function computeCaps() {
+    const f = (width * height) / 921600;
+    maxPlanes = Math.round(Math.max(90, Math.min(560, 420 * f)));
+    activeN = Math.round(Math.max(350, Math.min(routes.length || 1600, 1600 * f)));
+    if (routes.length) activeN = Math.min(activeN, routes.length);
+  }
+
+  function rebuildActive() {
+    if (!routes.length) return;
     cumW = []; totalW = 0;
-    for (const r of routes) { totalW += r.w; cumW.push(totalW); }
+    for (let i = 0; i < activeN; i++) { totalW += routes[i].w; cumW.push(totalW); }
+    for (const pl of planes) if (pl.ri >= activeN) respawn(pl);
   }
 
   function weightedPick() {
@@ -75,7 +125,7 @@
 
   function setPlaneCount(n) {
     if (!routes.length) return;
-    n = Math.max(0, Math.min(MAX_PLANES, n));
+    n = Math.max(0, Math.min(maxPlanes, n));
     while (planes.length < n) { const pl = {}; respawn(pl); pl.t = Math.random(); planes.push(pl); }
     if (planes.length > n) planes.length = n;
   }
@@ -90,6 +140,9 @@
   const elDate = document.getElementById("rodate");
   const elCount = document.getElementById("rocount");
   const elPlay = document.getElementById("play");
+  const elLive = document.getElementById("live");
+  const elModeled = document.getElementById("romodeled");
+  const elBar = document.getElementById("flightbar");
 
   function setDay(idx) {
     if (!daily) return;
@@ -97,10 +150,65 @@
     elSlider.value = dayIndex;
     elDate.textContent = fmtDate(dayIndex);
     elCount.textContent = "약 " + daily.counts[dayIndex].toLocaleString("ko-KR") + "편";
-    setPlaneCount(Math.round((daily.counts[dayIndex] / maxCount) * MAX_PLANES));
+    setPlaneCount(Math.round((daily.counts[dayIndex] / maxCount) * maxPlanes));
   }
 
-  function drawFlights() {
+  // ---- live (measured) mode ----------------------------------------------
+  function fetchLive() {
+    if (liveLoading) return;
+    liveLoading = true;
+    fetch("/api/live")
+      .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then((d) => {
+        liveLoading = false;
+        if (!liveMode) return;
+        liveCount = d.count || 0;
+        livePlanes = (d.sample || []).map((s) => ({ lon: s[0], lat: s[1], track: s[2], vel: s[3], cont: s[4] }));
+        // cap to screen-based plane budget
+        if (livePlanes.length > maxPlanes) livePlanes.length = maxPlanes;
+        elDate.textContent = "LIVE";
+        elCount.textContent = "현재 비행 중 약 " + liveCount.toLocaleString("ko-KR") + "대";
+      })
+      .catch((err) => {
+        liveLoading = false;
+        if (!liveMode) return;
+        elCount.textContent = "실시간 데이터를 불러오지 못함";
+        console.error("live fetch failed:", err);
+      });
+  }
+
+  function setLiveMode(on) {
+    liveMode = on;
+    elLive.classList.toggle("on", on);
+    elLive.textContent = on ? "LIVE ●" : "LIVE";
+    if (elBar) elBar.classList.toggle("liveon", on);
+    if (on) {
+      playing = false; elPlay.textContent = "▶";
+      if (elModeled) { elModeled.textContent = "실측"; elModeled.title = "OpenSky Network 실시간 측정 데이터"; }
+      elDate.textContent = "LIVE"; elCount.textContent = "불러오는 중…";
+      fetchLive();
+      if (liveTimer) clearInterval(liveTimer);
+      liveTimer = setInterval(fetchLive, 18000);
+    } else {
+      if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+      livePlanes = [];
+      if (elModeled) { elModeled.textContent = "대표값"; elModeled.title = "실측이 아닌 대표값(모델) 데이터입니다"; }
+      if (daily) setDay(dayIndex);
+    }
+  }
+
+  // Destination point given start, bearing (deg from north) and distance (m).
+  const EARTH_M = 6371000;
+  function destination(lon, lat, brgDeg, distM) {
+    const d = distM / EARTH_M, br = brgDeg * Math.PI / 180;
+    const la1 = lat * Math.PI / 180, lo1 = lon * Math.PI / 180;
+    const la2 = Math.asin(Math.sin(la1) * Math.cos(d) + Math.cos(la1) * Math.sin(d) * Math.cos(br));
+    const lo2 = lo1 + Math.atan2(Math.sin(br) * Math.sin(d) * Math.cos(la1), Math.cos(d) - Math.sin(la1) * Math.sin(la2));
+    return [((lo2 * 180 / Math.PI + 540) % 360) - 180, la2 * 180 / Math.PI];
+  }
+
+  function drawFlights(dt) {
+    if (liveMode) return drawLive(dt);
     if (!routes.length || !planes.length) return;
     const rot = projection.rotate();
     const center = [-rot[0], -rot[1]];
@@ -110,15 +218,15 @@
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
 
-    // Trails first, then plane glyphs on top.
+    // Trails first, then plane glyphs on top — both colored by departure continent.
     ctx.lineWidth = 1;
-    ctx.strokeStyle = "rgba(125, 247, 255, 0.34)";
     for (const pl of planes) {
       pl.t += pl.sp;
       if (pl.t >= 1) { respawn(pl); continue; }
       const r = routes[pl.ri];
       const head = r.interp(pl.t);
       if (d3.geoDistance(head, center) > horizon) continue;
+      ctx.strokeStyle = CONT_TRAIL[r.cont];
       const steps = 6, back = 0.09;
       ctx.beginPath();
       let started = false;
@@ -134,7 +242,6 @@
       ctx.stroke();
     }
 
-    ctx.fillStyle = "#eafcff";
     for (const pl of planes) {
       const r = routes[pl.ri];
       const head = r.interp(pl.t);
@@ -142,6 +249,36 @@
       const p0 = projection(head);
       const pa = projection(r.interp(Math.min(1, pl.t + 0.012)));
       const ang = Math.atan2(pa[1] - p0[1], pa[0] - p0[0]);
+      ctx.fillStyle = CONT_FILL[r.cont];
+      ctx.save();
+      ctx.translate(p0[0], p0[1]);
+      ctx.rotate(ang);
+      ctx.scale(glyphScale, glyphScale);
+      planeGlyph();
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  function drawLive(dt) {
+    if (!livePlanes.length) return;
+    const rot = projection.rotate();
+    const center = [-rot[0], -rot[1]];
+    const horizon = Math.PI / 2 - 0.02;
+    const glyphScale = Math.max(0.5, Math.min(2.4, scale * 0.0034));
+    const secs = Math.min(0.1, (dt || 16) / 1000); // dead-reckon step, clamped
+
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    for (const pl of livePlanes) {
+      if (pl.vel > 0) { const np = destination(pl.lon, pl.lat, pl.track, pl.vel * secs); pl.lon = np[0]; pl.lat = np[1]; }
+      const pos = [pl.lon, pl.lat];
+      if (d3.geoDistance(pos, center) > horizon) continue;
+      const p0 = projection(pos);
+      const ahead = destination(pl.lon, pl.lat, pl.track, 30000);
+      const pa = projection(ahead);
+      const ang = Math.atan2(pa[1] - p0[1], pa[0] - p0[0]);
+      ctx.fillStyle = CONT_FILL[pl.cont];
       ctx.save();
       ctx.translate(p0[0], p0[1]);
       ctx.rotate(ang);
@@ -192,6 +329,12 @@
     if (!scale) scale = baseScale;
     projection.translate([cx, cy]);
     makeStars();
+
+    if (routes.length) {
+      computeCaps();
+      rebuildActive();
+      if (daily && !liveMode) setDay(dayIndex); // re-evaluate plane count for new cap
+    }
   }
 
   function applyScale() {
@@ -336,13 +479,14 @@
     drawOcean();
     drawGraticule();
     drawLand();
-    drawFlights();
+    drawFlights(frameDt);
     drawRim();
   }
 
   function frame(t) {
     const dt = t - lastFrame;
     lastFrame = t;
+    frameDt = dt;
     if (autoSpin) {
       rotation[0] = (rotation[0] + (t - lastSpin) * 0.006) % 360; // ~6°/s
     }
@@ -442,11 +586,13 @@
     lastSpin = performance.now();
   });
 
-  elSlider.addEventListener("input", () => setDay(+elSlider.value));
+  elSlider.addEventListener("input", () => { if (liveMode) return; setDay(+elSlider.value); });
   elPlay.addEventListener("click", () => {
+    if (liveMode) return;
     playing = !playing;
     elPlay.textContent = playing ? "❚❚" : "▶";
   });
+  if (elLive) elLive.addEventListener("click", () => setLiveMode(!liveMode));
 
   window.addEventListener("resize", resize);
 

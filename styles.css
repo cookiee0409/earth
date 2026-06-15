@@ -97,6 +97,57 @@ html, body {
 #play:hover { border-color: rgba(120, 255, 200, 0.7); box-shadow: 0 0 16px rgba(80, 255, 180, 0.4); }
 #play:active { transform: scale(0.94); }
 
+#live {
+  flex: 0 0 auto;
+  height: 38px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 110, 140, 0.4);
+  background: rgba(60, 20, 36, 0.45);
+  color: #ff9bb0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+#live:hover { border-color: rgba(255, 110, 140, 0.8); box-shadow: 0 0 16px rgba(255, 80, 120, 0.45); }
+#live:active { transform: scale(0.94); }
+#live.on {
+  background: rgba(255, 60, 100, 0.22);
+  color: #ff5d80;
+  border-color: rgba(255, 80, 120, 0.9);
+  box-shadow: 0 0 18px rgba(255, 70, 110, 0.6);
+  animation: livepulse 1.6s ease-in-out infinite;
+}
+@keyframes livepulse { 0%,100% { box-shadow: 0 0 12px rgba(255,70,110,0.4); } 50% { box-shadow: 0 0 22px rgba(255,70,110,0.8); } }
+
+#flightbar.liveon #slidewrap #dateslider { opacity: 0.35; pointer-events: none; }
+#flightbar.liveon #play { opacity: 0.35; pointer-events: none; }
+
+#legend {
+  position: fixed;
+  left: 18px;
+  top: 18px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(120, 160, 255, 0.25);
+  background: rgba(16, 13, 38, 0.5);
+  backdrop-filter: blur(8px);
+  font-size: 12px;
+  color: rgba(200, 212, 255, 0.85);
+}
+#legend .lg-title { font-size: 11px; color: rgba(170, 190, 255, 0.7); margin-bottom: 2px; }
+#legend span { display: flex; align-items: center; gap: 7px; }
+#legend i {
+  width: 10px; height: 10px; border-radius: 3px; display: inline-block;
+  box-shadow: 0 0 8px currentColor;
+}
+
 #slidewrap { flex: 1 1 auto; display: flex; flex-direction: column; gap: 6px; }
 
 #dateslider {
@@ -146,6 +197,8 @@ html, body {
 @media (max-width: 540px) {
   #hint { display: none; }
   #controls { right: 12px; bottom: 84px; }
-  #flightbar { bottom: 14px; padding: 9px 12px; gap: 9px; }
+  #flightbar { bottom: 14px; padding: 9px 10px; gap: 8px; }
   #readout { font-size: 12px; gap: 7px; }
+  #live { padding: 0 9px; font-size: 11px; }
+  #legend { left: 12px; top: 12px; padding: 8px 10px; font-size: 11px; gap: 5px; }
 }
