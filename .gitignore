@@ -2,3 +2,7 @@ node_modules/
 .vercel
 .DS_Store
 *.log
+
+# Raw OpenFlights source (intermediates); processed into routes.json
+routes.dat
+airports.dat

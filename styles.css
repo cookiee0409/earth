@@ -64,7 +64,88 @@ html, body {
   pointer-events: none;
 }
 
+#flightbar {
+  position: fixed;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  width: min(560px, calc(100vw - 36px));
+  border-radius: 16px;
+  border: 1px solid rgba(120, 160, 255, 0.3);
+  background: rgba(16, 13, 38, 0.55);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 0 22px rgba(80, 120, 255, 0.18);
+}
+
+#play {
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  border: 1px solid rgba(120, 160, 255, 0.35);
+  background: rgba(30, 24, 60, 0.5);
+  color: #8effd6;
+  font-size: 15px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+#play:hover { border-color: rgba(120, 255, 200, 0.7); box-shadow: 0 0 16px rgba(80, 255, 180, 0.4); }
+#play:active { transform: scale(0.94); }
+
+#slidewrap { flex: 1 1 auto; display: flex; flex-direction: column; gap: 6px; }
+
+#dateslider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 5px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, rgba(120,90,255,0.5), rgba(60,240,255,0.7));
+  outline: none;
+  cursor: pointer;
+}
+#dateslider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: #eafcff;
+  border: 2px solid #5df9ff;
+  box-shadow: 0 0 10px rgba(93, 249, 255, 0.8);
+  cursor: pointer;
+}
+#dateslider::-moz-range-thumb {
+  width: 16px; height: 16px; border-radius: 50%;
+  background: #eafcff; border: 2px solid #5df9ff;
+  box-shadow: 0 0 10px rgba(93, 249, 255, 0.8);
+  cursor: pointer;
+}
+
+#readout {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 13px;
+  color: rgba(190, 205, 255, 0.85);
+}
+#rodate { font-weight: 500; color: #cfe3ff; }
+#rocount { color: #7df9ff; text-shadow: 0 0 10px rgba(93, 249, 255, 0.5); }
+#romodeled {
+  margin-left: auto;
+  font-size: 11px;
+  color: rgba(200, 150, 255, 0.75);
+  border: 1px solid rgba(200, 150, 255, 0.35);
+  border-radius: 6px;
+  padding: 1px 6px;
+  cursor: help;
+}
+
 @media (max-width: 540px) {
-  #hint { font-size: 11px; left: 14px; bottom: 16px; }
-  #controls { right: 12px; bottom: 16px; }
+  #hint { display: none; }
+  #controls { right: 12px; bottom: 84px; }
+  #flightbar { bottom: 14px; padding: 9px 12px; gap: 9px; }
+  #readout { font-size: 12px; gap: 7px; }
 }

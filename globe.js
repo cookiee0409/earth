@@ -26,6 +26,131 @@
   let rotation = [0, -12, 0]; // [λ, φ, γ]
   let autoSpin = true;
   let lastSpin = performance.now();
+  let lastFrame = performance.now();
+
+  // ---- flights ------------------------------------------------------------
+  let routes = [];          // [{o,d,w,interp,dist}]
+  let cumW = [], totalW = 0;
+  let daily = null;         // { start, counts:[...] }
+  let dayIndex = 0, maxCount = 1;
+  let playing = false, playAccum = 0;
+  let planes = [];
+  const MAX_PLANES = 420;
+  const SPEED_K = 0.0011;   // angular speed = K / route-length (constant ground speed)
+  const DAY_MS = 86400000;
+  const START_MS = Date.UTC(2019, 0, 1);
+
+  // Top-down plane silhouette pointing +x, given as the upper half outline.
+  const PLANE_HALF = [[9,0],[2,1.4],[2,2.2],[-1,7],[-2.6,7],[-2,2.2],[-4.6,2.2],[-5.2,4.6],[-6.8,4.6],[-6,1.1],[-8,0]];
+  function planeGlyph() {
+    ctx.beginPath();
+    ctx.moveTo(PLANE_HALF[0][0], PLANE_HALF[0][1]);
+    for (let i = 1; i < PLANE_HALF.length; i++) ctx.lineTo(PLANE_HALF[i][0], PLANE_HALF[i][1]);
+    for (let i = PLANE_HALF.length - 2; i >= 1; i--) ctx.lineTo(PLANE_HALF[i][0], -PLANE_HALF[i][1]);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function buildRoutes(data) {
+    routes = data.routes.map((a) => {
+      const o = [a[0], a[1]], d = [a[2], a[3]];
+      return { o, d, w: a[4], interp: d3.geoInterpolate(o, d), dist: Math.max(0.02, d3.geoDistance(o, d)) };
+    });
+    cumW = []; totalW = 0;
+    for (const r of routes) { totalW += r.w; cumW.push(totalW); }
+  }
+
+  function weightedPick() {
+    const x = Math.random() * totalW;
+    let lo = 0, hi = cumW.length - 1;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (cumW[m] < x) lo = m + 1; else hi = m; }
+    return lo;
+  }
+
+  function respawn(pl) {
+    pl.ri = weightedPick();
+    pl.t = 0;
+    pl.sp = SPEED_K / routes[pl.ri].dist;
+  }
+
+  function setPlaneCount(n) {
+    if (!routes.length) return;
+    n = Math.max(0, Math.min(MAX_PLANES, n));
+    while (planes.length < n) { const pl = {}; respawn(pl); pl.t = Math.random(); planes.push(pl); }
+    if (planes.length > n) planes.length = n;
+  }
+
+  function fmtDate(idx) {
+    const d = new Date(START_MS + idx * DAY_MS);
+    const p = (n) => String(n).padStart(2, "0");
+    return d.getUTCFullYear() + "." + p(d.getUTCMonth() + 1) + "." + p(d.getUTCDate());
+  }
+
+  const elSlider = document.getElementById("dateslider");
+  const elDate = document.getElementById("rodate");
+  const elCount = document.getElementById("rocount");
+  const elPlay = document.getElementById("play");
+
+  function setDay(idx) {
+    if (!daily) return;
+    dayIndex = Math.max(0, Math.min(daily.counts.length - 1, idx | 0));
+    elSlider.value = dayIndex;
+    elDate.textContent = fmtDate(dayIndex);
+    elCount.textContent = "약 " + daily.counts[dayIndex].toLocaleString("ko-KR") + "편";
+    setPlaneCount(Math.round((daily.counts[dayIndex] / maxCount) * MAX_PLANES));
+  }
+
+  function drawFlights() {
+    if (!routes.length || !planes.length) return;
+    const rot = projection.rotate();
+    const center = [-rot[0], -rot[1]];
+    const horizon = Math.PI / 2 - 0.02;
+    const glyphScale = Math.max(0.5, Math.min(2.4, scale * 0.0034));
+
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+
+    // Trails first, then plane glyphs on top.
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "rgba(125, 247, 255, 0.34)";
+    for (const pl of planes) {
+      pl.t += pl.sp;
+      if (pl.t >= 1) { respawn(pl); continue; }
+      const r = routes[pl.ri];
+      const head = r.interp(pl.t);
+      if (d3.geoDistance(head, center) > horizon) continue;
+      const steps = 6, back = 0.09;
+      ctx.beginPath();
+      let started = false;
+      for (let k = steps; k >= 0; k--) {
+        const tt = pl.t - back * (k / steps);
+        if (tt < 0) { started = false; continue; }
+        const pt = r.interp(tt);
+        if (d3.geoDistance(pt, center) > horizon) { started = false; continue; }
+        const pp = projection(pt);
+        if (started) ctx.lineTo(pp[0], pp[1]);
+        else { ctx.moveTo(pp[0], pp[1]); started = true; }
+      }
+      ctx.stroke();
+    }
+
+    ctx.fillStyle = "#eafcff";
+    for (const pl of planes) {
+      const r = routes[pl.ri];
+      const head = r.interp(pl.t);
+      if (d3.geoDistance(head, center) > horizon) continue;
+      const p0 = projection(head);
+      const pa = projection(r.interp(Math.min(1, pl.t + 0.012)));
+      const ang = Math.atan2(pa[1] - p0[1], pa[0] - p0[0]);
+      ctx.save();
+      ctx.translate(p0[0], p0[1]);
+      ctx.rotate(ang);
+      ctx.scale(glyphScale, glyphScale);
+      planeGlyph();
+      ctx.restore();
+    }
+    ctx.restore();
+  }
 
   // Starfield (screen-space, generated once on resize).
   let stars = [];
@@ -211,15 +336,25 @@
     drawOcean();
     drawGraticule();
     drawLand();
+    drawFlights();
     drawRim();
   }
 
   function frame(t) {
+    const dt = t - lastFrame;
+    lastFrame = t;
     if (autoSpin) {
-      const dt = t - lastSpin;
-      rotation[0] = (rotation[0] + dt * 0.006) % 360; // ~6°/s
+      rotation[0] = (rotation[0] + (t - lastSpin) * 0.006) % 360; // ~6°/s
     }
     lastSpin = t;
+    if (playing && daily) {
+      playAccum += dt;
+      const msPerDay = 45;
+      while (playAccum >= msPerDay) {
+        playAccum -= msPerDay;
+        setDay(dayIndex + 1 >= daily.counts.length ? 0 : dayIndex + 1);
+      }
+    }
     try {
       render(t);
     } catch (err) {
@@ -307,6 +442,12 @@
     lastSpin = performance.now();
   });
 
+  elSlider.addEventListener("input", () => setDay(+elSlider.value));
+  elPlay.addEventListener("click", () => {
+    playing = !playing;
+    elPlay.textContent = playing ? "❚❚" : "▶";
+  });
+
   window.addEventListener("resize", resize);
 
   // ---- boot ---------------------------------------------------------------
@@ -329,4 +470,19 @@
     .catch((err) => {
       console.error("Failed to load map data:", err);
     });
+
+  fetch("routes.json")
+    .then((r) => r.json())
+    .then((d) => { buildRoutes(d); if (daily) setDay(dayIndex); })
+    .catch((err) => { console.error("Failed to load routes:", err); });
+
+  fetch("daily.json")
+    .then((r) => r.json())
+    .then((d) => {
+      daily = d;
+      maxCount = d.counts.reduce((m, c) => (c > m ? c : m), 1);
+      elSlider.max = d.counts.length - 1;
+      setDay(d.counts.length - 1); // start at the most recent day
+    })
+    .catch((err) => { console.error("Failed to load daily data:", err); });
 })();
