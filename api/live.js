@@ -75,6 +75,13 @@ module.exports = async function handler(req, res) {
   }
 
   try {
+    // Diagnostic: ?probe checks general outbound egress (CORS-friendly host).
+    if (req.url && req.url.includes("probe")) {
+      const t0 = Date.now();
+      const pr = await fetch("https://api.github.com/meta", { headers: { "User-Agent": UA } });
+      return res.status(200).json({ probe: "github", ok: pr.ok, status: pr.status, ms: Date.now() - t0 });
+    }
+
     const tok = await getToken();
     const headers = { "User-Agent": UA, Accept: "application/json" };
     if (tok) headers.Authorization = "Bearer " + tok;
@@ -116,6 +123,7 @@ module.exports = async function handler(req, res) {
     return res.status(200).json(body);
   } catch (err) {
     if (cache.body) return res.status(200).json(cache.body); // serve stale on error
-    return res.status(502).json({ error: "live data unavailable", detail: String(err && err.message || err) });
+    const cause = err && err.cause ? (err.cause.code || String(err.cause)) : null;
+    return res.status(502).json({ error: "live data unavailable", detail: String(err && err.message || err), cause });
   }
 }
