@@ -164,6 +164,39 @@
   };
   const koName = (n) => KO[n] || n;
 
+  // Airport IATA -> Korean name (Korea complete + major world hubs).
+  const KO_AIR = {
+    ICN: "인천", GMP: "김포", PUS: "김해(부산)", CJU: "제주", TAE: "대구", KWJ: "광주",
+    CJJ: "청주", MWX: "무안", RSU: "여수", USN: "울산", KPO: "포항경주", YNY: "양양",
+    KUV: "군산", WJU: "원주", HIN: "사천",
+    NRT: "도쿄(나리타)", HND: "도쿄(하네다)", KIX: "오사카(간사이)", FUK: "후쿠오카",
+    NGO: "나고야", CTS: "삿포로", OKA: "오키나와", KOJ: "가고시마",
+    PEK: "베이징", PKX: "베이징(다싱)", PVG: "상하이(푸둥)", SHA: "상하이(훙차오)",
+    CAN: "광저우", SZX: "선전", CTU: "청두", TAO: "칭다오", SHE: "선양", DLC: "다롄",
+    HKG: "홍콩", MFM: "마카오", TPE: "타이베이", KHH: "가오슝",
+    BKK: "방콕(수완나품)", DMK: "방콕(돈므앙)", SIN: "싱가포르", KUL: "쿠알라룸푸르",
+    CGK: "자카르타", DPS: "발리", MNL: "마닐라", CEB: "세부", SGN: "호치민", HAN: "하노이",
+    DAD: "다낭", RGN: "양곤", PNH: "프놈펜", DEL: "델리", BOM: "뭄바이", CMB: "콜롬보",
+    KTM: "카트만두", DAC: "다카",
+    DXB: "두바이", AUH: "아부다비", DOH: "도하", RUH: "리야드", JED: "제다", KWI: "쿠웨이트",
+    TLV: "텔아비브", IST: "이스탄불",
+    LHR: "런던(히드로)", LGW: "런던(개트윅)", CDG: "파리(샤를드골)", FRA: "프랑크푸르트",
+    MUC: "뮌헨", AMS: "암스테르담", MAD: "마드리드", BCN: "바르셀로나", FCO: "로마",
+    MXP: "밀라노", ZRH: "취리히", VIE: "빈", BRU: "브뤼셀", CPH: "코펜하겐", ARN: "스톡홀름",
+    OSL: "오슬로", HEL: "헬싱키", SVO: "모스크바", ATH: "아테네", LIS: "리스본", DUB: "더블린",
+    JFK: "뉴욕(JFK)", EWR: "뉴욕(뉴어크)", LAX: "로스앤젤레스", SFO: "샌프란시스코",
+    ORD: "시카고", ATL: "애틀랜타", SEA: "시애틀", DFW: "댈러스", IAD: "워싱턴", BOS: "보스턴",
+    LAS: "라스베이거스", HNL: "호놀룰루", YVR: "밴쿠버", YYZ: "토론토", MEX: "멕시코시티",
+    GRU: "상파울루", GIG: "리우데자네이루", EZE: "부에노스아이레스", SCL: "산티아고",
+    LIM: "리마", BOG: "보고타",
+    SYD: "시드니", MEL: "멜버른", BNE: "브리즈번", AKL: "오클랜드", GUM: "괌", SPN: "사이판",
+    CAI: "카이로", JNB: "요하네스버그", CPT: "케이프타운", NBO: "나이로비", ADD: "아디스아바바",
+    CMN: "카사블랑카", LOS: "라고스",
+  };
+  const airLabel = (a) => a.iata
+    ? (KO_AIR[a.iata] ? a.iata + " " + KO_AIR[a.iata] : a.iata + " " + a.name)
+    : a.name;
+
   // Point-in-country for live aircraft (countries-110m), with a bbox prefilter.
   function countryOfLive(lon, lat) {
     if (!countryFeatures) return null;
@@ -260,7 +293,11 @@
     if (focusRoute != null) {
       shown = [focusRoute]; totalW = routes[focusRoute].w; cumW = [totalW];
     } else {
-      for (let i = 0; i < activeN; i++) {
+      // Filtered views consider every route (small sets); the unfiltered world
+      // view is capped to activeN for performance.
+      const filtered = depSel.size > 0 || arrSel.size > 0;
+      const N = filtered ? routes.length : activeN;
+      for (let i = 0; i < N; i++) {
         if (routeShown(routes[i])) { shown.push(i); totalW += routes[i].w; cumW.push(totalW); }
       }
     }
@@ -376,7 +413,7 @@
       title = fmtNames(depSel) + " → " + fmtNames(arrSel) + " 항공 흐름";
       rows.push(["주요 노선", dash(topRoutes.join(", "))]);
       let depTotal = 0;
-      for (let i = 0; i < activeN; i++) if (depSel.has(routes[i].oCountry)) depTotal++;
+      for (let i = 0; i < routes.length; i++) if (depSel.has(routes[i].oCountry)) depTotal++;
       const pct = depTotal ? Math.round((shown.length / depTotal) * 100) : 0;
       rows.push(["전체 대비", fmtNames(depSel) + " 출발 노선 중 약 " + pct + "%"]);
     } else if (hasDep) {
@@ -477,16 +514,17 @@
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
 
-    // Persistent route arcs — width + brightness scale with traffic weight.
+    // Persistent route arcs — width + brightness scale with traffic weight (~2× thicker).
+    // When a country is selected, the busiest route(s) are drawn in neon green.
     if (shown.length && shown.length <= LINE_CAP) {
-      for (const ri of shown) {
-        const r = routes[ri];
-        let lw, al;
-        if (r.w >= wP95) { lw = 3.6; al = 0.6; }        // top ~5%: bright + thick
-        else if (r.w >= wP80) { lw = 2.1; al = 0.34; }  // top ~20%: medium
-        else { lw = 1.1; al = 0.15; }                   // rest: thin + faint
+      const countrySel = depSel.size > 0 || arrSel.size > 0;
+      let shownMaxW = 0;
+      if (countrySel) for (const ri of shown) if (routes[ri].w > shownMaxW) shownMaxW = routes[ri].w;
+      const NEON_GREEN = [57, 255, 20];
+
+      const drawArc = (r, lw, col, al) => {
         ctx.lineWidth = lw;
-        ctx.strokeStyle = cssRGBA(rgbOf(r.oCountry, r.oCont), al);
+        ctx.strokeStyle = cssRGBA(col, al);
         ctx.beginPath();
         let started = false;
         for (let i = 0; i < r.lineCoords.length; i++) {
@@ -496,7 +534,19 @@
           else { ctx.moveTo(pp[0], pp[1]); started = true; }
         }
         ctx.stroke();
+      };
+
+      const greens = [];
+      for (const ri of shown) {
+        const r = routes[ri];
+        if (countrySel && r.w === shownMaxW) { greens.push(r); continue; }
+        let lw, al;
+        if (r.w >= wP95) { lw = 7.2; al = 0.6; }         // top ~5%: bright + thick
+        else if (r.w >= wP80) { lw = 4.2; al = 0.34; }   // top ~20%: medium
+        else { lw = 2.2; al = 0.15; }                    // rest: thin + faint
+        drawArc(r, lw, rgbOf(r.oCountry, r.oCont), al);
       }
+      for (const r of greens) drawArc(r, 8, NEON_GREEN, 0.95); // busiest route(s) on top
     }
 
     drawMarks(center, horizon);
@@ -676,14 +726,20 @@
   }
 
   function drawAtmosphere() {
-    // Outer neon halo around the globe edge.
     const r0 = scale * 0.96;
-    const r1 = scale * 1.35;
+    const r1 = scale * (neonOn ? 1.35 : 1.18);
     const halo = ctx.createRadialGradient(cx, cy, r0, cx, cy, r1);
-    halo.addColorStop(0, "rgba(90, 120, 255, 0)");
-    halo.addColorStop(0.4, "rgba(120, 90, 255, 0.30)");
-    halo.addColorStop(0.7, "rgba(60, 150, 255, 0.16)");
-    halo.addColorStop(1, "rgba(60, 150, 255, 0)");
+    if (neonOn) {
+      halo.addColorStop(0, "rgba(90, 120, 255, 0)");
+      halo.addColorStop(0.4, "rgba(120, 90, 255, 0.30)");
+      halo.addColorStop(0.7, "rgba(60, 150, 255, 0.16)");
+      halo.addColorStop(1, "rgba(60, 150, 255, 0)");
+    } else {
+      // Thin realistic blue limb haze.
+      halo.addColorStop(0, "rgba(120, 170, 230, 0)");
+      halo.addColorStop(0.6, "rgba(120, 175, 235, 0.12)");
+      halo.addColorStop(1, "rgba(120, 175, 235, 0)");
+    }
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
     ctx.fillStyle = halo;
@@ -694,14 +750,16 @@
   }
 
   function drawOcean() {
-    // Globe disc with a deep purple→blue gradient.
     const oc = ctx.createRadialGradient(
       cx - scale * 0.3, cy - scale * 0.3, scale * 0.1,
       cx, cy, scale
     );
-    oc.addColorStop(0, "#241159");
-    oc.addColorStop(0.55, "#12104a");
-    oc.addColorStop(1, "#070a33");
+    if (neonOn) {
+      oc.addColorStop(0, "#241159"); oc.addColorStop(0.55, "#12104a"); oc.addColorStop(1, "#070a33");
+    } else {
+      // Realistic sea: lit blue near the sub-solar highlight → dark at the limb.
+      oc.addColorStop(0, "#3f86c4"); oc.addColorStop(0.55, "#1d5a90"); oc.addColorStop(1, "#0a2740");
+    }
     ctx.beginPath();
     path(sphere);
     ctx.fillStyle = oc;
@@ -709,6 +767,7 @@
   }
 
   function drawGraticule() {
+    if (!neonOn) return; // realistic globe has no neon grid
     ctx.beginPath();
     path(graticule);
     ctx.save();
@@ -735,14 +794,19 @@
       sheen.addColorStop(1, "#2fb6ff");
       lctx.fillStyle = sheen;
     } else {
-      lctx.fillStyle = "#7fbfe0"; // plain sky blue when neon is off
+      // Realistic land: natural green, lit toward the sub-solar point.
+      const g = lctx.createRadialGradient(cx - scale * 0.3, cy - scale * 0.3, scale * 0.1, cx, cy, scale);
+      g.addColorStop(0, "#6f9e54");
+      g.addColorStop(0.6, "#4f7d3c");
+      g.addColorStop(1, "#385c2c");
+      lctx.fillStyle = g;
     }
     lctx.fill();
 
     lctx.beginPath();
     lpath(land);
     lctx.lineWidth = Math.max(0.6, scale * 0.0018);
-    lctx.strokeStyle = neonOn ? "rgba(170, 255, 225, 0.95)" : "rgba(210, 235, 250, 0.9)";
+    lctx.strokeStyle = neonOn ? "rgba(170, 255, 225, 0.95)" : "rgba(40, 70, 35, 0.55)";
     lctx.stroke();
 
     // Country borders.
@@ -775,13 +839,15 @@
   }
 
   function drawRim() {
-    // Thin glowing edge of the planet (single arc — cheap shadow).
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
-    ctx.shadowColor = "#5a8cff";
-    ctx.shadowBlur = 18;
-    ctx.lineWidth = 1.4;
-    ctx.strokeStyle = "rgba(140, 170, 255, 0.7)";
+    if (neonOn) {
+      ctx.shadowColor = "#5a8cff"; ctx.shadowBlur = 18;
+      ctx.lineWidth = 1.4; ctx.strokeStyle = "rgba(140, 170, 255, 0.7)";
+    } else {
+      ctx.shadowColor = "#aacdf0"; ctx.shadowBlur = 6;
+      ctx.lineWidth = 1; ctx.strokeStyle = "rgba(150, 185, 225, 0.45)";
+    }
     ctx.beginPath();
     ctx.arc(cx, cy, scale, 0, Math.PI * 2);
     ctx.stroke();
@@ -1021,7 +1087,7 @@
     const list = (countryAirports[name] || []).map((i) => airports[i])
       .sort((a, b) => (a.iata || "").localeCompare(b.iata || ""));
     document.getElementById("aw-list").innerHTML =
-      list.map((a) => '<div class="aw-row"><b>' + (a.iata || "—") + "</b> " + a.name + "</div>").join("")
+      list.map((a) => '<div class="aw-row"><b>' + (a.iata || "—") + "</b> " + (KO_AIR[a.iata] || a.name) + "</div>").join("")
       || '<div class="aw-row">공항 정보 없음</div>';
     win.hidden = false;
   }
@@ -1146,7 +1212,7 @@
       console.error("Failed to load map data:", err);
     });
 
-  fetch("routes.json?v=5")
+  fetch("routes.json?v=6")
     .then((r) => r.json())
     .then((d) => {
       buildRoutes(d);

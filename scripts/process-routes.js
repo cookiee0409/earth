@@ -54,6 +54,16 @@ function countryOf(lon, lat) {
   return null;
 }
 
+// airports.dat country name -> Natural Earth name (for the geoContains fallback,
+// which kicks in for small islands the 110m polygons miss, e.g. Jeju).
+const ALIAS = {
+  "United States": "United States of America", "Czech Republic": "Czechia",
+  "Ivory Coast": "Côte d'Ivoire", "Democratic Republic of the Congo": "Dem. Rep. Congo",
+  "Congo (Kinshasa)": "Dem. Rep. Congo", "Dominican Republic": "Dominican Rep.",
+  "Burma": "Myanmar", "Macau": "China", "Hong Kong": "China",
+};
+const aliasNE = (n) => ALIAS[n] || n;
+
 function gcDistKm(a, b) {
   const R = 6371, toR = Math.PI / 180;
   const dLat = (b[1] - a[1]) * toR, dLon = (b[0] - a[0]) * toR;
@@ -64,13 +74,43 @@ function gcDistKm(a, b) {
 
 // airports.dat: id,name,city,country,iata,icao,lat,lon,...
 const ap = new Map(); // id -> {lon,lat,iata,name,city}
+const iataToId = new Map();
 for (const line of fs.readFileSync(path.join(root, "airports.dat"), "utf8").split(/\r?\n/)) {
   if (!line.trim()) continue;
   const f = parseCSVLine(line);
   const lat = parseFloat(f[6]), lon = parseFloat(f[7]);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
   const iata = f[4] && f[4] !== "\\N" ? f[4] : (f[5] && f[5] !== "\\N" ? f[5] : "");
-  ap.set(f[0], { lon, lat, iata, name: f[1] || iata, city: f[2] || "" });
+  ap.set(f[0], { lon, lat, iata, name: f[1] || iata, city: f[2] || "", country: f[3] || "" });
+  if (f[4] && f[4] !== "\\N" && !iataToId.has(f[4])) iataToId.set(f[4], f[0]);
+}
+
+// Curated Korea network with approximate real daily-flight frequency (each way).
+// OpenFlights' codeshare-count weight misses domestic LCC traffic (e.g. GMP–CJU,
+// the world's busiest route), so these override it for a realistic domestic view.
+const KR_ROUTES = [
+  ["GMP", "CJU", 90], ["GMP", "PUS", 16], ["GMP", "KWJ", 6], ["GMP", "USN", 6], ["GMP", "RSU", 4],
+  ["CJU", "PUS", 24], ["CJU", "TAE", 14], ["CJU", "KWJ", 9], ["CJU", "CJJ", 16], ["CJU", "RSU", 4],
+  ["CJU", "USN", 6], ["CJU", "KPO", 3], ["CJU", "MWX", 3], ["CJU", "ICN", 8], ["CJU", "YNY", 2],
+  ["CJU", "KUV", 2], ["CJU", "WJU", 2], ["CJU", "HIN", 2],
+  ["ICN", "NRT", 25], ["ICN", "KIX", 20], ["ICN", "FUK", 16], ["ICN", "HND", 10], ["ICN", "NGO", 6],
+  ["ICN", "CTS", 6], ["ICN", "OKA", 5], ["ICN", "PVG", 16], ["ICN", "PEK", 12], ["ICN", "CAN", 8],
+  ["ICN", "HKG", 14], ["ICN", "TPE", 16], ["ICN", "BKK", 18], ["ICN", "SIN", 10], ["ICN", "KUL", 6],
+  ["ICN", "CGK", 5], ["ICN", "MNL", 12], ["ICN", "CEB", 8], ["ICN", "SGN", 12], ["ICN", "HAN", 12],
+  ["ICN", "DAD", 12], ["ICN", "DEL", 5], ["ICN", "BOM", 3], ["ICN", "DXB", 5], ["ICN", "DOH", 4],
+  ["ICN", "IST", 4], ["ICN", "LHR", 4], ["ICN", "CDG", 4], ["ICN", "FRA", 5], ["ICN", "AMS", 3],
+  ["ICN", "LAX", 9], ["ICN", "JFK", 6], ["ICN", "SFO", 6], ["ICN", "SEA", 5], ["ICN", "ATL", 3],
+  ["ICN", "ORD", 3], ["ICN", "YVR", 5], ["ICN", "YYZ", 3], ["ICN", "SYD", 4], ["ICN", "GUM", 6],
+  ["ICN", "SPN", 3], ["PUS", "NRT", 6], ["PUS", "KIX", 8], ["PUS", "FUK", 6], ["PUS", "TPE", 6],
+  ["PUS", "HKG", 4], ["PUS", "BKK", 6], ["PUS", "DAD", 5], ["PUS", "CEB", 4],
+];
+const curated = [];
+const curatedKeys = new Set();
+for (const [oi, di, w] of KR_ROUTES) {
+  const s = iataToId.get(oi), d = iataToId.get(di);
+  if (!s || !d) continue;
+  curated.push({ s, d, w }); curatedKeys.add(s + "|" + d);
+  curated.push({ s: d, d: s, w }); curatedKeys.add(d + "|" + s);
 }
 
 // routes.dat: airline,airlineId,src,srcId,dst,dstId,...  (weight = #records)
@@ -104,7 +144,7 @@ function airIdxOf(id) {
   if (airIdx.has(id)) return airIdx.get(id);
   const a = ap.get(id);
   let cty = ctyCache.get(id);
-  if (cty === undefined) { cty = countryOf(a.lon, a.lat); ctyCache.set(id, cty); }
+  if (cty === undefined) { cty = countryOf(a.lon, a.lat) || aliasNE(a.country) || null; ctyCache.set(id, cty); }
   const cont = continentOf(a.lon, a.lat);
   const ci = cty ? countryIdxOf(cty) : -1;
   const i = airports.length;
@@ -113,7 +153,9 @@ function airIdxOf(id) {
   return i;
 }
 
-const rows = top.map((r) => [r.w, airIdxOf(r.s), airIdxOf(r.d)]);
+// Drop OpenFlights routes that the curated Korea set overrides, then append it.
+const merged = top.filter((r) => !curatedKeys.has(r.s + "|" + r.d)).concat(curated);
+const rows = merged.map((r) => [r.w, airIdxOf(r.s), airIdxOf(r.d)]);
 
 // Fix each country to a SINGLE continent (override, else majority of its airports),
 // so a country never appears under two continents (Russia, Indonesia, Morocco, …).
