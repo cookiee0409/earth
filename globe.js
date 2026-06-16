@@ -303,6 +303,7 @@
     maxPlanes = selectionCap();
     rebuildShown();
     buildSummary();
+    updateRouteGuide();
   }
 
   function buildCountryAirports() {
@@ -380,6 +381,7 @@
     rebuildShown();
     computeMarks();
     buildSummary();
+    updateRouteGuide();
     if (daily && !liveMode) setPlaneCount(Math.round((daily.counts[dayIndex] / maxCount) * maxPlanes));
   }
 
@@ -399,6 +401,50 @@
   const elSummary = document.getElementById("summary");
   const elSumTitle = document.getElementById("sum-title");
   const elSumBody = document.getElementById("sum-body");
+  const elGuideDep = document.getElementById("rg-dep");
+  const elGuideArr = document.getElementById("rg-arr");
+  const elGuideRoute = document.getElementById("rg-route");
+  const elGuideNote = document.getElementById("rg-note");
+  const elClearSelection = document.getElementById("clear-selection");
+  const mobileTabButtons = [...document.querySelectorAll("#mobiletabs button[data-mtab]")];
+  let mobileTab = "filters";
+
+  function isMobileView() {
+    return window.matchMedia && window.matchMedia("(max-width: 560px)").matches;
+  }
+
+  function setMobileTab(tab) {
+    mobileTab = tab || "filters";
+    if (isMobileView()) document.body.dataset.mobileTab = mobileTab;
+    else document.body.removeAttribute("data-mobile-tab");
+    updateMobileTabs();
+  }
+
+  function updateMobileTabs() {
+    if (!mobileTabButtons.length) return;
+    const cp = document.getElementById("countrypanel");
+    const aw = document.getElementById("airportwin");
+    const rl = document.getElementById("routelist");
+    const disabled = {
+      countries: !cp || cp.hidden,
+      airports: !aw || aw.hidden,
+      routes: !rl || rl.hidden,
+      summary: !elSummary || elSummary.hidden,
+    };
+    for (const b of mobileTabButtons) {
+      const tab = b.dataset.mtab;
+      b.classList.toggle("on", tab === mobileTab);
+      b.disabled = !!disabled[tab];
+    }
+    if (isMobileView() && disabled[mobileTab]) {
+      const fallback = !disabled.summary ? "summary" : "filters";
+      if (mobileTab !== fallback) {
+        mobileTab = fallback;
+        document.body.dataset.mobileTab = mobileTab;
+        updateMobileTabs();
+      }
+    }
+  }
 
   // ---- filter summary panel ----------------------------------------------
   function fmtNames(set) {
@@ -407,6 +453,38 @@
     if (a.length === 1) return koName(a[0]);
     return koName(a[0]) + " 외 " + (a.length - 1) + "개국";
   }
+  function updateRouteGuide() {
+    const depReady = depSel.size > 0;
+    const arrReady = arrSel.size > 0;
+    const countryRouteCount = focusCountry && rlRoutes.length ? rlRoutes.length : 0;
+    const routeCount = countryRouteCount || shown.length;
+    const hasRoutes = routeCount > 0;
+    if (elGuideDep) {
+      elGuideDep.textContent = depReady ? "1 " + fmtNames(depSel) + " 출발" : (focusCountry ? "1 " + koName(focusCountry) + " 분석" : "1 출발 선택");
+      elGuideDep.classList.toggle("active", depReady || !!focusCountry);
+    }
+    if (elGuideArr) {
+      elGuideArr.textContent = arrReady ? "2 " + fmtNames(arrSel) + " 도착" : "2 도착 선택";
+      elGuideArr.classList.toggle("active", arrReady);
+    }
+    if (elGuideRoute) {
+      const routeText = focusRoute != null ? "선택 노선" : (hasRoutes ? routeCount.toLocaleString("ko-KR") + "개 노선" : "노선 없음");
+      elGuideRoute.textContent = "3 " + routeText;
+      elGuideRoute.classList.toggle("active", focusRoute != null || depReady || arrReady || !!focusCountry);
+    }
+    if (elGuideNote) {
+      let note = "출발과 도착 대륙을 열어 국가를 선택하세요.";
+      if (focusRoute != null) note = "선택한 단일 노선만 강조하고 있습니다.";
+      else if (focusCountry) note = "국가의 공항과 노선 목록에서 확인할 항로를 선택하세요.";
+      else if (depReady && arrReady) note = "노선 목록과 지도에서 선택한 출발-도착 흐름을 확인하세요.";
+      else if (depReady) note = "도착 국가를 선택하면 출발-도착 노선만 좁혀집니다.";
+      else if (arrReady) note = "출발 국가를 선택하면 도착 노선의 출발지를 좁힙니다.";
+      elGuideNote.textContent = note;
+    }
+    if (elClearSelection) elClearSelection.disabled = !(depReady || arrReady || focusRoute != null || focusCountry != null);
+    updateMobileTabs();
+  }
+
   function topByWeight(map, n) {
     return [...map.entries()].sort((x, y) => y[1] - x[1]).slice(0, n);
   }
@@ -529,8 +607,10 @@
     if (elBar) elBar.classList.toggle("liveon", on);
     if (elDatePick) elDatePick.disabled = on;
     if (on) {
+      if (elSummary) elSummary.hidden = true;
       if (elModeled) { elModeled.textContent = "실측"; elModeled.title = "adsb.lol 실시간 측정 데이터 (ADS-B)"; }
       elCount.textContent = "불러오는 중…";
+      updateRouteGuide();
       fetchLive();
       if (liveTimer) clearInterval(liveTimer);
       liveTimer = setInterval(fetchLive, 18000);
@@ -539,6 +619,8 @@
       livePlanes = [];
       if (elModeled) { elModeled.textContent = "대표값"; elModeled.title = "실측이 아닌 대표값(모델) 데이터입니다"; }
       if (daily) setDay(dayIndex);
+      buildSummary();
+      updateRouteGuide();
     }
   }
 
@@ -1180,13 +1262,36 @@
     });
   });
 
+  if (elClearSelection) {
+    elClearSelection.addEventListener("click", () => {
+      depSel.clear();
+      arrSel.clear();
+      focusRoute = null;
+      focusCountry = null;
+      hideRoutePopup();
+      const aw = document.getElementById("airportwin"); if (aw) aw.hidden = true;
+      const rl = document.getElementById("routelist"); if (rl) rl.hidden = true;
+      applyFilter();
+      refreshUI();
+      setMobileTab("filters");
+    });
+  }
+
+  mobileTabButtons.forEach((b) => {
+    b.addEventListener("click", () => setMobileTab(b.dataset.mtab));
+  });
+
   // Route-list pagination.
   const rlPrev = document.getElementById("rl-prev");
   const rlNext = document.getElementById("rl-next");
   const rlClose = document.getElementById("rl-close");
   if (rlPrev) rlPrev.addEventListener("click", () => { rlPage--; renderRouteList(); });
   if (rlNext) rlNext.addEventListener("click", () => { rlPage++; renderRouteList(); });
-  if (rlClose) rlClose.addEventListener("click", () => { document.getElementById("routelist").hidden = true; });
+  if (rlClose) rlClose.addEventListener("click", () => {
+    document.getElementById("routelist").hidden = true;
+    setMobileTab("summary");
+    updateRouteGuide();
+  });
 
   // ---- departure / arrival filter UI -------------------------------------
   const LEGEND_ORDER = [3, 4, 1, 2, 0, 5];
@@ -1269,6 +1374,8 @@
       list.appendChild(row);
     }
     panel.hidden = false;
+    setMobileTab("countries");
+    updateRouteGuide();
   }
 
   // Separate window listing a country's airports (item: 공항 이름 별도 창).
@@ -1296,6 +1403,8 @@
       host.appendChild(row);
     }
     win.hidden = false;
+    setMobileTab("airports");
+    updateRouteGuide();
   }
 
   // Right-side paginated route list (country- or airport-scoped), sorted by traffic.
@@ -1306,12 +1415,16 @@
     rlRoutes = routes.filter((r) => r.oCountry === country || r.dCountry === country).sort((a, b) => b.w - a.w);
     rlPage = 0; renderRouteList();
     const rl = document.getElementById("routelist"); if (rl) rl.hidden = false;
+    setMobileTab("routes");
+    updateRouteGuide();
   }
   function showAirportRoutes(a) {
     rlHeader = (KO_AIR[a.iata] || a.name) + " (" + a.iata + ") 노선";
     rlRoutes = routes.filter((r) => r.oAir.iata === a.iata || r.dAir.iata === a.iata).sort((x, y) => y.w - x.w);
     rlPage = 0; renderRouteList();
     const rl = document.getElementById("routelist"); if (rl) rl.hidden = false;
+    setMobileTab("routes");
+    updateRouteGuide();
   }
   function renderRouteList() {
     const total = rlRoutes.length;
@@ -1320,8 +1433,18 @@
     document.getElementById("rl-title").textContent = rlHeader + " " + total + "개";
     const slice = rlRoutes.slice(rlPage * RL_PER, rlPage * RL_PER + RL_PER);
     document.getElementById("rl-body").innerHTML = slice.map((r) =>
-      '<div class="rl-row"><span class="rl-rt">' + rlLabel(r.oAir) + " → " + rlLabel(r.dAir) + '</span><span class="rl-w">' + r.w.toLocaleString("ko-KR") + "</span></div>"
+      '<button type="button" class="rl-row" data-ri="' + routes.indexOf(r) + '"><span class="rl-rt">' + rlLabel(r.oAir) + " → " + rlLabel(r.dAir) + '</span><span class="rl-w">' + r.w.toLocaleString("ko-KR") + "</span></button>"
     ).join("") || '<div class="rl-row">노선 없음</div>';
+    document.querySelectorAll("#rl-body .rl-row[data-ri]").forEach((row) => {
+      row.addEventListener("click", () => {
+        focusRoute = +row.dataset.ri;
+        focusCountry = null;
+        maxPlanes = selectionCap();
+        rebuildShown(); computeMarks(); buildSummary(); updateRouteGuide();
+        if (daily && !liveMode) setPlaneCount(Math.round((daily.counts[dayIndex] / maxCount) * maxPlanes));
+        showRoutePopup(0, 0, routes[focusRoute]);
+      });
+    });
     document.getElementById("rl-page").textContent = (rlPage + 1) + " / " + pages;
   }
 
@@ -1333,10 +1456,14 @@
     document.getElementById("countrypanel").hidden = true;
     const aw = document.getElementById("airportwin"); if (aw) aw.hidden = true;
     const rl = document.getElementById("routelist"); if (rl) rl.hidden = true;
-    curPanel = null; buildLegends();
+    curPanel = null; buildLegends(); setMobileTab("filters"); updateRouteGuide();
   });
   const awCloseBtn = document.getElementById("aw-close");
-  if (awCloseBtn) awCloseBtn.addEventListener("click", () => { document.getElementById("airportwin").hidden = true; });
+  if (awCloseBtn) awCloseBtn.addEventListener("click", () => {
+    document.getElementById("airportwin").hidden = true;
+    setMobileTab("routes");
+    updateRouteGuide();
+  });
 
   // Bottom-left: neon toggle + always-show-airports.
   const elNeon = document.getElementById("neon-toggle");
@@ -1399,6 +1526,7 @@
       focusRoute = bestRi; focusCountry = null;
       maxPlanes = selectionCap();
       rebuildShown(); computeMarks(); buildSummary();
+      updateRouteGuide();
       if (daily && !liveMode) setPlaneCount(Math.round((daily.counts[dayIndex] / maxCount) * maxPlanes));
       showRoutePopup(0, 0, routes[bestRi]);
       return;
@@ -1436,17 +1564,23 @@
         depSel.add(geoName);
         applyFilter();
         // Open its departure panel for context.
-        for (const c of LEGEND_ORDER) if (depTree[c] && depTree[c].has(geoName)) { openCountryPanel("dep", c); break; }
+        if (isMobileView()) setMobileTab("filters");
+        else for (const c of LEGEND_ORDER) if (depTree[c] && depTree[c].has(geoName)) { openCountryPanel("dep", c); break; }
       }
     }
     buildLegends();
+    updateRouteGuide();
   }
 
-  window.addEventListener("resize", resize);
+  window.addEventListener("resize", () => {
+    resize();
+    setMobileTab(mobileTab);
+  });
 
   // ---- boot ---------------------------------------------------------------
 
   resize();
+  setMobileTab("filters");
   scale = baseScale;
 
   // Start the render loop immediately so the ocean, stars and atmosphere

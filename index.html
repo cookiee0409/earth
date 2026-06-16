@@ -18,6 +18,25 @@
 
   <div id="hint">드래그로 돌리기 · 휠 또는 ± 버튼으로 확대·축소</div>
 
+  <div id="routeguide" aria-live="polite">
+    <div class="rg-steps" aria-label="노선 확인 단계">
+      <span id="rg-dep" class="rg-step">1 출발 선택</span>
+      <span id="rg-arr" class="rg-step">2 도착 선택</span>
+      <span id="rg-route" class="rg-step">3 노선 확인</span>
+    </div>
+    <div id="rg-note">출발과 도착 대륙을 열어 국가를 선택하세요.</div>
+    <button id="clear-selection" type="button">전체 보기</button>
+  </div>
+
+  <div id="mobiletabs" role="tablist" aria-label="모바일 패널">
+    <button type="button" data-mtab="filters" class="on">선택</button>
+    <button type="button" data-mtab="countries">국가</button>
+    <button type="button" data-mtab="airports">공항</button>
+    <button type="button" data-mtab="routes">노선</button>
+    <button type="button" data-mtab="summary">요약</button>
+    <button type="button" data-mtab="options">옵션</button>
+  </div>
+
   <div id="filterbox">
     <div class="fl-sec">
       <div class="fl-title"><span class="fl-dot dep"></span>출발 · 클릭 시 국가</div>
