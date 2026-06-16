@@ -103,8 +103,20 @@
   let focusRoute = null;     // a clicked single route (overrides the filter)
   let focusCountry = null;   // a clicked country whose analysis fills the summary
   let neonOn = true;         // neon land glow toggle
+  let neonColor = "blue";    // neon hue preset
   let alwaysAirports = false; // show all airports as markers even without a selection
+  let flowType = "all";      // route flow filter: all | intl | dom
   let countryAirports = {};  // country name -> [airport idx] (all airports of the country)
+  let rlRoutes = [], rlPage = 0, rlCountry = null; // right-side route list (paginated)
+  const RL_PER = 7;
+
+  // Neon hue presets (land sheen / atmosphere / coastline / border / rim).
+  const PALETTE = {
+    blue:   { land: ["#13e58a", "#0fd6a6", "#2fb6ff"], atmo: ["rgba(120,90,255,0.30)", "rgba(60,150,255,0.16)"], coast: "rgba(170,255,225,0.95)", border: "rgba(206,138,255,0.95)", rim: "#5a8cff", grat: "rgba(90,150,255,0.22)" },
+    green:  { land: ["#1fe85a", "#16d24a", "#86ff39"], atmo: ["rgba(60,255,120,0.28)", "rgba(120,255,80,0.16)"], coast: "rgba(190,255,190,0.95)", border: "rgba(120,255,160,0.9)", rim: "#39ff7a", grat: "rgba(90,255,150,0.22)" },
+    yellow: { land: ["#e6e016", "#e0c020", "#ffe23f"], atmo: ["rgba(255,220,60,0.26)", "rgba(255,180,40,0.16)"], coast: "rgba(255,250,190,0.95)", border: "rgba(255,225,120,0.9)", rim: "#ffd23f", grat: "rgba(255,220,90,0.2)" },
+  };
+  const pal = () => PALETTE[neonColor] || PALETTE.blue;
 
   // Plane cap by how narrow the current view is.
   function coversFullContinent(sel, tree) {
@@ -128,6 +140,8 @@
 
   // Departure ∩ arrival rule (both empty = no filter = show all):
   function routeShown(r) {
+    if (flowType === "dom" && r.oCountry !== r.dCountry) return false;
+    if (flowType === "intl" && r.oCountry === r.dCountry) return false;
     const depOk = depSel.size === 0 || depSel.has(r.oCountry);
     const arrOk = arrSel.size === 0 || arrSel.has(r.dCountry);
     return depOk && arrOk;
@@ -730,10 +744,11 @@
     const r1 = scale * (neonOn ? 1.35 : 1.18);
     const halo = ctx.createRadialGradient(cx, cy, r0, cx, cy, r1);
     if (neonOn) {
-      halo.addColorStop(0, "rgba(90, 120, 255, 0)");
-      halo.addColorStop(0.4, "rgba(120, 90, 255, 0.30)");
-      halo.addColorStop(0.7, "rgba(60, 150, 255, 0.16)");
-      halo.addColorStop(1, "rgba(60, 150, 255, 0)");
+      const A = pal().atmo;
+      halo.addColorStop(0, A[0].replace(/[\d.]+\)$/, "0)"));
+      halo.addColorStop(0.4, A[0]);
+      halo.addColorStop(0.7, A[1]);
+      halo.addColorStop(1, A[1].replace(/[\d.]+\)$/, "0)"));
     } else {
       // Thin realistic blue limb haze.
       halo.addColorStop(0, "rgba(120, 170, 230, 0)");
@@ -773,9 +788,37 @@
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
     ctx.lineWidth = 0.5;
-    ctx.strokeStyle = "rgba(90, 150, 255, 0.22)";
+    ctx.strokeStyle = pal().grat;
     ctx.stroke();
     ctx.restore();
+  }
+
+  // Approximate biome/terrain bands for the realistic (neon-off) globe.
+  const lonlatBox = (b) => ({ type: "Polygon", coordinates: [[[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]], [b[0], b[1]]]] });
+  const BIOMES = [
+    ["#eef4f8", -180, -90, 180, -63], ["#eef4f8", -55, 60, -18, 84],
+    ["#eef4f8", -140, 72, -60, 84], ["#eef4f8", 60, 72, 180, 84],          // ice
+    ["#cdb27a", -16, 15, 35, 30], ["#cdb27a", 35, 15, 58, 30], ["#cdb27a", 58, 25, 78, 35],
+    ["#cdb27a", 90, 38, 112, 46], ["#cdb27a", 118, -30, 142, -20], ["#cdb27a", 12, -28, 25, -18],
+    ["#cdb27a", -116, 24, -104, 36], ["#cdb27a", -71, -26, -68, -19],       // desert
+    ["#2e6b34", -74, -10, -50, 3], ["#2e6b34", 11, -5, 30, 5], ["#2e6b34", 96, -6, 120, 7], // jungle
+    ["#998b76", 74, 27, 96, 36], ["#998b76", -74, -38, -67, 2], ["#998b76", -122, 36, -108, 54], ["#998b76", 6, 45, 15, 48], // mountains
+  ];
+  const RIVERS = [
+    [[31, 31], [31, 24], [32, 16], [31, 9], [30, 4]],
+    [[-49, -1], [-58, -3], [-67, -4], [-73, -5]],
+    [[-90, 29], [-91, 35], [-90, 39], [-93, 44], [-95, 47]],
+    [[121, 31], [114, 30], [106, 30], [99, 28]],
+    [[12, -6], [18, -4], [24, 0], [27, 2]],
+  ];
+  function drawTerrain() {
+    lctx.save();
+    lctx.beginPath(); lpath(land); lctx.clip();
+    for (const bi of BIOMES) { lctx.beginPath(); lpath(lonlatBox(bi.slice(1))); lctx.fillStyle = bi[0]; lctx.fill(); }
+    lctx.lineWidth = Math.max(0.8, scale * 0.0016);
+    lctx.strokeStyle = "#3f7fb0";
+    for (const rv of RIVERS) { lctx.beginPath(); lpath({ type: "LineString", coordinates: rv }); lctx.stroke(); }
+    lctx.restore();
   }
 
   function drawLand() {
@@ -788,25 +831,24 @@
     lctx.beginPath();
     lpath(land);
     if (neonOn) {
+      const P = pal().land;
       const sheen = lctx.createLinearGradient(cx - scale, cy - scale, cx + scale, cy + scale);
-      sheen.addColorStop(0, "#13e58a");
-      sheen.addColorStop(0.5, "#0fd6a6");
-      sheen.addColorStop(1, "#2fb6ff");
+      sheen.addColorStop(0, P[0]);
+      sheen.addColorStop(0.5, P[1]);
+      sheen.addColorStop(1, P[2]);
       lctx.fillStyle = sheen;
+      lctx.fill();
     } else {
-      // Realistic land: natural green, lit toward the sub-solar point.
-      const g = lctx.createRadialGradient(cx - scale * 0.3, cy - scale * 0.3, scale * 0.1, cx, cy, scale);
-      g.addColorStop(0, "#6f9e54");
-      g.addColorStop(0.6, "#4f7d3c");
-      g.addColorStop(1, "#385c2c");
-      lctx.fillStyle = g;
+      // Realistic land: base green, then terrain (desert/forest/ice/mountain/rivers).
+      lctx.fillStyle = "#4f7d3c";
+      lctx.fill();
+      drawTerrain();
     }
-    lctx.fill();
 
     lctx.beginPath();
     lpath(land);
     lctx.lineWidth = Math.max(0.6, scale * 0.0018);
-    lctx.strokeStyle = neonOn ? "rgba(170, 255, 225, 0.95)" : "rgba(40, 70, 35, 0.55)";
+    lctx.strokeStyle = neonOn ? pal().coast : "rgba(40, 70, 35, 0.5)";
     lctx.stroke();
 
     // Country borders.
@@ -814,7 +856,7 @@
       lctx.beginPath();
       lpath(borders);
       lctx.lineWidth = Math.max(0.7, scale * 0.0014);
-      lctx.strokeStyle = neonOn ? "rgba(206, 138, 255, 0.95)" : "rgba(150, 180, 210, 0.8)";
+      lctx.strokeStyle = neonOn ? pal().border : "rgba(70, 95, 60, 0.45)";
       lctx.stroke();
     }
 
@@ -842,8 +884,8 @@
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
     if (neonOn) {
-      ctx.shadowColor = "#5a8cff"; ctx.shadowBlur = 18;
-      ctx.lineWidth = 1.4; ctx.strokeStyle = "rgba(140, 170, 255, 0.7)";
+      ctx.shadowColor = pal().rim; ctx.shadowBlur = 18;
+      ctx.lineWidth = 1.4; ctx.strokeStyle = pal().rim;
     } else {
       ctx.shadowColor = "#aacdf0"; ctx.shadowBlur = 6;
       ctx.lineWidth = 1; ctx.strokeStyle = "rgba(150, 185, 225, 0.45)";
@@ -991,13 +1033,38 @@
     });
   }
 
-  // Speed buttons (1× / 2× / 4× / 8×).
+  // Speed buttons (1× / 2× / 4× / 8× / 16×).
   document.querySelectorAll("#speeds button").forEach((b) => {
     b.addEventListener("click", () => {
       speed = +b.dataset.sp;
       document.querySelectorAll("#speeds button").forEach((x) => x.classList.toggle("on", x === b));
     });
   });
+
+  // Neon color presets.
+  document.querySelectorAll("#neon-colors button").forEach((b) => {
+    b.addEventListener("click", () => {
+      neonColor = b.dataset.nc;
+      document.querySelectorAll("#neon-colors button").forEach((x) => x.classList.toggle("on", x === b));
+    });
+  });
+
+  // International / domestic / all flow filter.
+  document.querySelectorAll("#flowbar button").forEach((b) => {
+    b.addEventListener("click", () => {
+      flowType = b.dataset.flow;
+      document.querySelectorAll("#flowbar button").forEach((x) => x.classList.toggle("on", x === b));
+      focusRoute = null; hideRoutePopup(); applyFilter();
+    });
+  });
+
+  // Route-list pagination.
+  const rlPrev = document.getElementById("rl-prev");
+  const rlNext = document.getElementById("rl-next");
+  const rlClose = document.getElementById("rl-close");
+  if (rlPrev) rlPrev.addEventListener("click", () => { rlPage--; renderRouteList(); });
+  if (rlNext) rlNext.addEventListener("click", () => { rlPage++; renderRouteList(); });
+  if (rlClose) rlClose.addEventListener("click", () => { document.getElementById("routelist").hidden = true; });
 
   // ---- departure / arrival filter UI -------------------------------------
   const LEGEND_ORDER = [3, 4, 1, 2, 0, 5];
@@ -1072,7 +1139,7 @@
       const nm = document.createElement("span");
       nm.className = "cp-cty"; nm.textContent = koName(name);
       nm.title = "클릭: 항공 흐름 분석 + 공항 목록";
-      nm.addEventListener("click", () => { focusCountry = name; buildSummary(); showAirportWindow(name); });
+      nm.addEventListener("click", () => { focusCountry = name; buildSummary(); showAirportWindow(name); showRouteList(name); });
       row.appendChild(cb); row.appendChild(sw); row.appendChild(nm);
       list.appendChild(row);
     }
@@ -1092,6 +1159,29 @@
     win.hidden = false;
   }
 
+  // Right-side paginated route list for a clicked country (sorted by traffic).
+  function showRouteList(country) {
+    rlCountry = country;
+    rlRoutes = routes.filter((r) => r.oCountry === country || r.dCountry === country)
+      .sort((a, b) => b.w - a.w);
+    rlPage = 0;
+    renderRouteList();
+    const rl = document.getElementById("routelist");
+    if (rl) rl.hidden = false;
+  }
+  function renderRouteList() {
+    const total = rlRoutes.length;
+    const pages = Math.max(1, Math.ceil(total / RL_PER));
+    rlPage = Math.max(0, Math.min(pages - 1, rlPage));
+    document.getElementById("rl-title").textContent = koName(rlCountry) + " 노선 " + total + "개";
+    const slice = rlRoutes.slice(rlPage * RL_PER, rlPage * RL_PER + RL_PER);
+    document.getElementById("rl-body").innerHTML = slice.map((r) => {
+      const o = r.oAir.iata || r.oAir.name, d = r.dAir.iata || r.dAir.name;
+      return '<div class="rl-row"><span class="rl-rt">' + o + " → " + d + '</span><span class="rl-w">' + r.w.toLocaleString("ko-KR") + "</span></div>";
+    }).join("") || '<div class="rl-row">노선 없음</div>';
+    document.getElementById("rl-page").textContent = (rlPage + 1) + " / " + pages;
+  }
+
   function refreshLegendsOnly() { buildLegends(); }
   function refreshUI() { buildLegends(); if (curPanel) openCountryPanel(curPanel.mode, curPanel.cont); }
 
@@ -1099,6 +1189,7 @@
   if (cpCloseBtn) cpCloseBtn.addEventListener("click", () => {
     document.getElementById("countrypanel").hidden = true;
     const aw = document.getElementById("airportwin"); if (aw) aw.hidden = true;
+    const rl = document.getElementById("routelist"); if (rl) rl.hidden = true;
     curPanel = null; buildLegends();
   });
   const awCloseBtn = document.getElementById("aw-close");

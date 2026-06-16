@@ -288,7 +288,7 @@ html, body {
 
 #summary {
   position: fixed;
-  top: 14px;
+  top: 56px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 11;
@@ -369,6 +369,73 @@ html, body {
   font-size: 12px; color: rgba(200, 212, 255, 0.85); cursor: pointer;
 }
 #airport-always-label input { width: 15px; height: 15px; accent-color: #5df9ff; cursor: pointer; }
+.fx-row { display: flex; align-items: center; gap: 8px; }
+#neon-colors { display: flex; gap: 5px; }
+#neon-colors button {
+  width: 18px; height: 18px; border-radius: 50%; cursor: pointer;
+  background: var(--sw); border: 2px solid transparent;
+  box-shadow: 0 0 8px var(--sw); padding: 0;
+}
+#neon-colors button.on { border-color: #fff; }
+
+#flowbar {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 12;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 11px;
+  border: 1px solid rgba(120, 160, 255, 0.3);
+  background: rgba(16, 13, 38, 0.6);
+  backdrop-filter: blur(8px);
+}
+#flowbar button {
+  height: 28px; padding: 0 12px; border-radius: 8px;
+  border: 1px solid transparent; background: transparent;
+  color: rgba(200, 212, 255, 0.8); font-size: 12px; cursor: pointer;
+}
+#flowbar button.on { background: rgba(93, 249, 255, 0.18); color: #8ffcff; border-color: rgba(93, 249, 255, 0.7); }
+
+#routelist {
+  position: fixed;
+  right: 18px;
+  top: 104px;
+  z-index: 11;
+  width: 220px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(120, 160, 255, 0.3);
+  background: rgba(16, 13, 38, 0.85);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 0 24px rgba(80, 120, 255, 0.22);
+  color: #cfe3ff;
+  font-size: 12px;
+}
+#routelist[hidden] { display: none; }
+#rl-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+#rl-title { font-size: 13px; font-weight: 600; color: #8ffcff; }
+#rl-close {
+  width: 22px; height: 22px; border-radius: 6px;
+  border: 1px solid rgba(120, 160, 255, 0.3); background: transparent;
+  color: #9fb6ff; cursor: pointer; font-size: 11px;
+}
+#rl-close:hover { color: #fff; border-color: rgba(255, 110, 140, 0.6); }
+#rl-body { display: flex; flex-direction: column; gap: 3px; min-height: 154px; }
+.rl-row { display: flex; justify-content: space-between; gap: 10px; padding: 3px 4px; border-radius: 5px; }
+.rl-row:nth-child(odd) { background: rgba(120, 160, 255, 0.07); }
+.rl-rt { color: #dfe9ff; }
+.rl-w { color: #7df9ff; font-weight: 500; }
+#rl-nav { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 9px; }
+#rl-nav button {
+  width: 30px; height: 26px; border-radius: 7px;
+  border: 1px solid rgba(120, 160, 255, 0.35); background: rgba(30, 24, 60, 0.5);
+  color: #b9e6ff; cursor: pointer; font-size: 11px;
+}
+#rl-nav button:hover { border-color: rgba(120, 255, 200, 0.7); }
+#rl-page { font-size: 12px; color: rgba(200, 212, 255, 0.85); min-width: 46px; text-align: center; }
 
 #routepop {
   position: fixed;
@@ -404,10 +471,13 @@ html, body {
   #speeds button { width: 28px; height: 28px; font-size: 10px; }
   #speednote { display: none; }
   #rocount { font-size: 11px; }
-  #summary { top: 8px; width: calc(100vw - 20px); padding: 9px 12px; }
+  #flowbar { top: 6px; padding: 3px; }
+  #flowbar button { height: 26px; padding: 0 9px; font-size: 11px; }
+  #summary { top: 42px; width: calc(100vw - 20px); padding: 9px 12px; }
   #sum-row, .sum-row { font-size: 11px; }
   #routepop { top: auto; bottom: 96px; right: 10px; max-width: calc(100vw - 20px); }
-  #airportwin { left: auto; right: 10px; top: 92px; width: 150px; }
+  #airportwin { left: 10px; right: auto; top: 300px; width: 150px; max-height: 40vh; }
+  #routelist { right: 10px; top: 300px; width: 150px; }
   #fxpanel { left: 10px; bottom: 100px; padding: 8px 10px; gap: 6px; }
   #neon-toggle { height: 28px; font-size: 11px; }
   #airport-always-label { font-size: 11px; }

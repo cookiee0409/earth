@@ -47,13 +47,39 @@
   </div>
 
   <div id="fxpanel">
-    <button id="neon-toggle">네온효과: 켜짐</button>
+    <div class="fx-row">
+      <button id="neon-toggle">네온효과: 켜짐</button>
+      <div id="neon-colors" role="group" aria-label="네온 색상">
+        <button data-nc="blue" class="on" title="형광 파랑" style="--sw:#2fb6ff"></button>
+        <button data-nc="green" title="형광 초록" style="--sw:#39ff7a"></button>
+        <button data-nc="yellow" title="형광 노랑" style="--sw:#ffe23f"></button>
+      </div>
+    </div>
     <label id="airport-always-label"><input type="checkbox" id="always-airports" /> 공항 항상 표시</label>
+  </div>
+
+  <div id="flowbar" role="group" aria-label="운항 구분">
+    <button data-flow="all" class="on">전체</button>
+    <button data-flow="intl">국제선</button>
+    <button data-flow="dom">국내선</button>
   </div>
 
   <div id="summary" hidden>
     <div id="sum-title"></div>
     <div id="sum-body"></div>
+  </div>
+
+  <div id="routelist" hidden>
+    <div id="rl-head">
+      <span id="rl-title"></span>
+      <button id="rl-close" aria-label="닫기">✕</button>
+    </div>
+    <div id="rl-body"></div>
+    <div id="rl-nav">
+      <button id="rl-prev" aria-label="이전">◀</button>
+      <span id="rl-page"></span>
+      <button id="rl-next" aria-label="다음">▶</button>
+    </div>
   </div>
 
   <div id="routepop" hidden></div>
