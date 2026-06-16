@@ -6,3 +6,7 @@ node_modules/
 # Raw OpenFlights source (intermediates); processed into routes.json
 routes.dat
 airports.dat
+
+# large raster source (downsized to earth-hypso.jpg)
+hyp50.tif
+*.tif

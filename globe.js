@@ -109,14 +109,49 @@
   let countryAirports = {};  // country name -> [airport idx] (all airports of the country)
   let rlRoutes = [], rlPage = 0, rlCountry = null; // right-side route list (paginated)
   const RL_PER = 7;
+  let flyAnim = null; // animated globe move to a country/airport
+
+  // Smoothly rotate (and zoom) the globe to center a lon/lat.
+  function flyTo(lon, lat, k) {
+    const r = projection.rotate();
+    let dLon = -lon - r[0];
+    while (dLon > 180) dLon -= 360;
+    while (dLon < -180) dLon += 360;
+    flyAnim = {
+      fromLon: r[0], dLon, fromLat: r[1], toLat: Math.max(-90, Math.min(90, -lat)),
+      fromS: scale, toS: k ? Math.max(baseScale * MIN_K, Math.min(baseScale * MAX_K, baseScale * k)) : scale,
+      t0: performance.now(), dur: 750,
+    };
+  }
+  function countryCentroid(name) {
+    const a = (countryAirports[name] || []).map((i) => airports[i]);
+    if (!a.length) return null;
+    let x = 0, y = 0;
+    for (const p of a) { x += p.lon; y += p.lat; }
+    return [x / a.length, y / a.length];
+  }
 
   // Neon hue presets (land sheen / atmosphere / coastline / border / rim).
   const PALETTE = {
     blue:   { land: ["#13e58a", "#0fd6a6", "#2fb6ff"], atmo: ["rgba(120,90,255,0.30)", "rgba(60,150,255,0.16)"], coast: "rgba(170,255,225,0.95)", border: "rgba(206,138,255,0.95)", rim: "#5a8cff", grat: "rgba(90,150,255,0.22)" },
     green:  { land: ["#1fe85a", "#16d24a", "#86ff39"], atmo: ["rgba(60,255,120,0.28)", "rgba(120,255,80,0.16)"], coast: "rgba(190,255,190,0.95)", border: "rgba(120,255,160,0.9)", rim: "#39ff7a", grat: "rgba(90,255,150,0.22)" },
-    yellow: { land: ["#e6e016", "#e0c020", "#ffe23f"], atmo: ["rgba(255,220,60,0.26)", "rgba(255,180,40,0.16)"], coast: "rgba(255,250,190,0.95)", border: "rgba(255,225,120,0.9)", rim: "#ffd23f", grat: "rgba(255,220,90,0.2)" },
   };
   const pal = () => PALETTE[neonColor] || PALETTE.blue;
+
+  // Realistic (neon-off) Natural Earth texture, reprojected onto the sphere.
+  let texData = null, texW = 0, texH = 0;
+  let texCanvas = null, texCtx = null, texKey = "", texStep = 99;
+  const texImg = new Image();
+  texImg.onload = () => {
+    const c = document.createElement("canvas");
+    c.width = texImg.naturalWidth; c.height = texImg.naturalHeight;
+    const cc = c.getContext("2d");
+    cc.drawImage(texImg, 0, 0);
+    texW = c.width; texH = c.height;
+    texData = cc.getImageData(0, 0, texW, texH).data;
+    texKey = "";
+  };
+  texImg.src = "earth-hypso.jpg?v=1";
 
   // Plane cap by how narrow the current view is.
   function coversFullContinent(sel, tree) {
@@ -821,6 +856,55 @@
     lctx.restore();
   }
 
+  // ---- realistic textured globe (neon off) -------------------------------
+  function ensureTexCanvas() {
+    if (!texCanvas) { texCanvas = document.createElement("canvas"); texCtx = texCanvas.getContext("2d"); }
+    if (texCanvas.width !== width || texCanvas.height !== height) {
+      texCanvas.width = width; texCanvas.height = height; texKey = "";
+    }
+  }
+  function reprojectKey() {
+    const r = projection.rotate();
+    return r[0].toFixed(1) + "_" + r[1].toFixed(1) + "_" + scale.toFixed(0);
+  }
+  function reproject(step) {
+    const img = texCtx.createImageData(width, height);
+    const od = img.data;
+    const R2 = scale * scale, invert = projection.invert;
+    for (let y = 0; y < height; y += step) {
+      const dy = y - cy;
+      for (let x = 0; x < width; x += step) {
+        const dx = x - cx;
+        if (dx * dx + dy * dy > R2) continue;
+        const ll = invert([x, y]);
+        if (!ll) continue;
+        let u = (((ll[0] + 180) / 360) * texW) | 0; if (u < 0) u = 0; else if (u >= texW) u = texW - 1;
+        let v = (((90 - ll[1]) / 180) * texH) | 0; if (v < 0) v = 0; else if (v >= texH) v = texH - 1;
+        const si = (v * texW + u) << 2;
+        const r = texData[si], g = texData[si + 1], b = texData[si + 2];
+        for (let yy = 0; yy < step; yy++) {
+          const Y = y + yy; if (Y >= height) break;
+          for (let xx = 0; xx < step; xx++) {
+            const X = x + xx; if (X >= width) break;
+            const di = (Y * width + X) << 2;
+            od[di] = r; od[di + 1] = g; od[di + 2] = b; od[di + 3] = 255;
+          }
+        }
+      }
+    }
+    texCtx.putImageData(img, 0, 0);
+  }
+  function drawTexturedGlobe() {
+    if (!texData) { // texture not loaded yet → plain ocean disc
+      ctx.beginPath(); path(sphere); ctx.fillStyle = "#11385e"; ctx.fill(); return;
+    }
+    ensureTexCanvas();
+    const wantStep = dragging ? 2 : 1;
+    const key = reprojectKey();
+    if (key !== texKey || wantStep < texStep) { reproject(wantStep); texKey = key; texStep = wantStep; }
+    ctx.drawImage(texCanvas, 0, 0, width, height);
+  }
+
   function drawLand() {
     if (!land) return;
 
@@ -903,9 +987,13 @@
 
     drawBackground(t);
     drawAtmosphere();
-    drawOcean();
-    drawGraticule();
-    drawLand();
+    if (neonOn) {
+      drawOcean();
+      drawGraticule();
+      drawLand();
+    } else {
+      drawTexturedGlobe(); // Natural Earth hypso texture (ocean + land + relief)
+    }
     drawFlights(frameDt);
     drawRim();
   }
@@ -915,6 +1003,14 @@
     lastFrame = t;
     frameDt = dt;
     lastSpin = t; // auto-rotation disabled — globe only turns when dragged
+    if (flyAnim) {
+      const e = Math.min(1, (t - flyAnim.t0) / flyAnim.dur);
+      const ease = e < 0.5 ? 2 * e * e : 1 - Math.pow(-2 * e + 2, 2) / 2;
+      rotation[0] = flyAnim.fromLon + flyAnim.dLon * ease;
+      rotation[1] = flyAnim.fromLat + (flyAnim.toLat - flyAnim.fromLat) * ease;
+      scale = flyAnim.fromS + (flyAnim.toS - flyAnim.fromS) * ease;
+      if (e >= 1) flyAnim = null;
+    }
     if (!paused && !liveMode && daily) {
       playAccum += dt;
       const msPerDay = BASE_MS_PER_DAY / speed;
@@ -941,6 +1037,7 @@
   function pointerDown(e) {
     dragging = true;
     autoSpin = false;
+    flyAnim = null; // a drag cancels any in-progress fly-to
     if (spinResume) clearTimeout(spinResume);
     lastX = e.clientX;
     lastY = e.clientY;
@@ -1140,7 +1237,10 @@
       nm.className = "cp-cty"; nm.textContent = koName(name);
       nm.title = "클릭: 항공 흐름 분석 + 공항 목록";
       nm.addEventListener("click", () => { focusCountry = name; buildSummary(); showAirportWindow(name); showRouteList(name); });
-      row.appendChild(cb); row.appendChild(sw); row.appendChild(nm);
+      const go = document.createElement("button");
+      go.className = "go-btn"; go.textContent = "⊕"; go.title = "이 국가로 이동";
+      go.addEventListener("click", (e) => { e.stopPropagation(); const ce = countryCentroid(name); if (ce) flyTo(ce[0], ce[1], 2.6); });
+      row.appendChild(cb); row.appendChild(sw); row.appendChild(nm); row.appendChild(go);
       list.appendChild(row);
     }
     panel.hidden = false;
@@ -1153,9 +1253,19 @@
     document.getElementById("aw-title").textContent = koName(name) + " 공항";
     const list = (countryAirports[name] || []).map((i) => airports[i])
       .sort((a, b) => (a.iata || "").localeCompare(b.iata || ""));
-    document.getElementById("aw-list").innerHTML =
-      list.map((a) => '<div class="aw-row"><b>' + (a.iata || "—") + "</b> " + (KO_AIR[a.iata] || a.name) + "</div>").join("")
-      || '<div class="aw-row">공항 정보 없음</div>';
+    const host = document.getElementById("aw-list");
+    host.innerHTML = "";
+    if (!list.length) { host.innerHTML = '<div class="aw-row">공항 정보 없음</div>'; }
+    for (const a of list) {
+      const row = document.createElement("div");
+      row.className = "aw-row";
+      row.innerHTML = "<b>" + (a.iata || "—") + "</b> <span>" + (KO_AIR[a.iata] || a.name) + "</span>";
+      const go = document.createElement("button");
+      go.className = "go-btn"; go.textContent = "⊕"; go.title = "이 공항으로 이동";
+      go.addEventListener("click", () => flyTo(a.lon, a.lat, 6));
+      row.appendChild(go);
+      host.appendChild(row);
+    }
     win.hidden = false;
   }
 
@@ -1217,8 +1327,27 @@
     return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
   }
 
+  function treeHas(tree, cty) { for (const c in tree) if (tree[c].has(cty)) return true; return false; }
+  function contInTree(tree, cty) { for (const c in tree) if (tree[c].has(cty)) return +c; return -1; }
+
+  // Clicking a country on the globe toggles it into departure (or arrival) selection.
+  function toggleCountrySelection(cty) {
+    const inDep = treeHas(depTree, cty), inArr = treeHas(arrTree, cty);
+    if (!inDep && !inArr) return false;
+    const mode = inDep ? "dep" : "arr";
+    const sel = mode === "dep" ? depSel : arrSel;
+    if (sel.has(cty)) sel.delete(cty); else sel.add(cty);
+    focusRoute = null; focusCountry = cty; hideRoutePopup();
+    applyFilter();
+    const c = contInTree(mode === "dep" ? depTree : arrTree, cty);
+    if (c >= 0) openCountryPanel(mode, c);
+    buildLegends();
+    buildSummary(); showAirportWindow(cty); showRouteList(cty);
+    return true;
+  }
+
   function routeClick(x, y) {
-    if (liveMode || !shown.length) return;
+    if (liveMode) return;
     const rot = projection.rotate();
     const center = [-rot[0], -rot[1]];
     const horizon = Math.PI / 2 - 0.02;
@@ -1239,11 +1368,14 @@
       rebuildShown(); computeMarks(); buildSummary();
       if (daily && !liveMode) setPlaneCount(Math.round((daily.counts[dayIndex] / maxCount) * maxPlanes));
       showRoutePopup(0, 0, routes[bestRi]);
-    } else if (focusRoute != null) {
-      focusRoute = null; hideRoutePopup(); applyFilter();
-    } else {
-      hideRoutePopup();
+      return;
     }
+    // No route line hit → did the user click a country?
+    const ll = projection.invert([x, y]);
+    const cty = ll ? countryOfLive(ll[0], ll[1]) : null;
+    if (cty && toggleCountrySelection(cty)) return;
+    if (focusRoute != null) { focusRoute = null; hideRoutePopup(); applyFilter(); }
+    else hideRoutePopup();
   }
 
   function showRoutePopup(x, y, r) {

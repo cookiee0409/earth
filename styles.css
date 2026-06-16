@@ -334,8 +334,17 @@ html, body {
   background: transparent; color: #9fb6ff; cursor: pointer; font-size: 11px;
 }
 #aw-close:hover { color: #fff; border-color: rgba(255, 110, 140, 0.6); }
-.aw-row { padding: 2px 0; line-height: 1.45; color: rgba(200, 215, 255, 0.85); }
-.aw-row b { color: #7df9ff; margin-right: 5px; }
+.aw-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; line-height: 1.45; color: rgba(200, 215, 255, 0.85); }
+.aw-row b { color: #7df9ff; flex: 0 0 auto; }
+.aw-row span { flex: 1 1 auto; }
+.go-btn {
+  flex: 0 0 auto;
+  width: 20px; height: 20px; border-radius: 6px;
+  border: 1px solid rgba(120, 200, 255, 0.4);
+  background: rgba(40, 70, 110, 0.4); color: #8ffcff;
+  font-size: 12px; line-height: 1; cursor: pointer; padding: 0;
+}
+.go-btn:hover { border-color: rgba(120, 255, 200, 0.8); box-shadow: 0 0 10px rgba(93, 249, 255, 0.5); }
 
 #fxpanel {
   position: fixed;
