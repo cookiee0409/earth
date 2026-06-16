@@ -335,8 +335,9 @@ html, body {
 }
 #aw-close:hover { color: #fff; border-color: rgba(255, 110, 140, 0.6); }
 .aw-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; line-height: 1.45; color: rgba(200, 215, 255, 0.85); }
-.aw-row b { color: #7df9ff; flex: 0 0 auto; }
-.aw-row span { flex: 1 1 auto; }
+.aw-name { flex: 1 1 auto; cursor: pointer; }
+.aw-name b { color: #dfe9ff; font-weight: 500; }
+.aw-name:hover b, .aw-name:hover { color: #8ffcff; }
 .go-btn {
   flex: 0 0 auto;
   width: 20px; height: 20px; border-radius: 6px;
@@ -432,11 +433,11 @@ html, body {
   color: #9fb6ff; cursor: pointer; font-size: 11px;
 }
 #rl-close:hover { color: #fff; border-color: rgba(255, 110, 140, 0.6); }
-#rl-body { display: flex; flex-direction: column; gap: 3px; min-height: 154px; }
-.rl-row { display: flex; justify-content: space-between; gap: 10px; padding: 3px 4px; border-radius: 5px; }
+#rl-body { display: flex; flex-direction: column; gap: 3px; min-height: 200px; }
+.rl-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding: 3px 4px; border-radius: 5px; font-size: 11px; }
 .rl-row:nth-child(odd) { background: rgba(120, 160, 255, 0.07); }
-.rl-rt { color: #dfe9ff; }
-.rl-w { color: #7df9ff; font-weight: 500; }
+.rl-rt { flex: 1 1 auto; color: #dfe9ff; line-height: 1.35; word-break: keep-all; }
+.rl-w { flex: 0 0 auto; color: #7df9ff; font-weight: 500; }
 #rl-nav { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 9px; }
 #rl-nav button {
   width: 30px; height: 26px; border-radius: 7px;

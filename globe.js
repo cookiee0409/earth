@@ -133,14 +133,14 @@
 
   // Neon hue presets (land sheen / atmosphere / coastline / border / rim).
   const PALETTE = {
-    blue:   { land: ["#13e58a", "#0fd6a6", "#2fb6ff"], atmo: ["rgba(120,90,255,0.30)", "rgba(60,150,255,0.16)"], coast: "rgba(170,255,225,0.95)", border: "rgba(206,138,255,0.95)", rim: "#5a8cff", grat: "rgba(90,150,255,0.22)" },
-    green:  { land: ["#1fe85a", "#16d24a", "#86ff39"], atmo: ["rgba(60,255,120,0.28)", "rgba(120,255,80,0.16)"], coast: "rgba(190,255,190,0.95)", border: "rgba(120,255,160,0.9)", rim: "#39ff7a", grat: "rgba(90,255,150,0.22)" },
+    blue:   { land: ["#13e58a", "#0fd6a6", "#2fb6ff"], atmo: ["rgba(120,90,255,0.18)", "rgba(60,150,255,0.10)"], coast: "rgba(170,255,225,0.8)", border: "rgba(206,138,255,0.8)", rim: "#5a8cff", grat: "rgba(90,150,255,0.16)" },
+    green:  { land: ["#1fe85a", "#16d24a", "#86ff39"], atmo: ["rgba(60,255,120,0.17)", "rgba(120,255,80,0.10)"], coast: "rgba(190,255,190,0.8)", border: "rgba(120,255,160,0.78)", rim: "#39ff7a", grat: "rgba(90,255,150,0.16)" },
   };
   const pal = () => PALETTE[neonColor] || PALETTE.blue;
 
   // Realistic (neon-off) Natural Earth texture, reprojected onto the sphere.
   let texData = null, texW = 0, texH = 0;
-  let texCanvas = null, texCtx = null, texKey = "", texStep = 99;
+  let texCanvas = null, texCtx = null, texKey = "", texStep = 99, texBuf = null;
   const texImg = new Image();
   texImg.onload = () => {
     const c = document.createElement("canvas");
@@ -151,7 +151,7 @@
     texData = cc.getImageData(0, 0, texW, texH).data;
     texKey = "";
   };
-  texImg.src = "earth-hypso.jpg?v=1";
+  texImg.src = "earth-hypso.jpg?v=2";
 
   // Plane cap by how narrow the current view is.
   function coversFullContinent(sel, tree) {
@@ -590,12 +590,12 @@
         const r = routes[ri];
         if (countrySel && r.w === shownMaxW) { greens.push(r); continue; }
         let lw, al;
-        if (r.w >= wP95) { lw = 7.2; al = 0.6; }         // top ~5%: bright + thick
-        else if (r.w >= wP80) { lw = 4.2; al = 0.34; }   // top ~20%: medium
-        else { lw = 2.2; al = 0.15; }                    // rest: thin + faint
+        if (r.w >= wP95) { lw = 7.2; al = 0.42; }        // top ~5%: bright + thick
+        else if (r.w >= wP80) { lw = 4.2; al = 0.26; }   // top ~20%: medium
+        else { lw = 2.2; al = 0.12; }                    // rest: thin + faint
         drawArc(r, lw, rgbOf(r.oCountry, r.oCont), al);
       }
-      for (const r of greens) drawArc(r, 8, NEON_GREEN, 0.95); // busiest route(s) on top
+      for (const r of greens) drawArc(r, 8, NEON_GREEN, 0.72); // busiest route(s) on top
     }
 
     drawMarks(center, horizon);
@@ -867,21 +867,46 @@
     const r = projection.rotate();
     return r[0].toFixed(1) + "_" + r[1].toFixed(1) + "_" + scale.toFixed(0);
   }
+  // Inline orthographic inverse + d3 rotation inverse (no per-pixel d3.geoPath
+  // overhead). Reuses one ImageData buffer; bilinear sampling when idle.
   function reproject(step) {
-    const img = texCtx.createImageData(width, height);
-    const od = img.data;
-    const R2 = scale * scale, invert = projection.invert;
+    if (!texBuf || texBuf.width !== width || texBuf.height !== height) texBuf = texCtx.createImageData(width, height);
+    const od = texBuf.data;
+    od.fill(0);
+    const s = scale, RAD = 180 / Math.PI;
+    const unrot = d3.geoRotation(projection.rotate()).invert;
+    const bilinear = step === 1;
+    const tw = texW, th = texH, td = texData;
     for (let y = 0; y < height; y += step) {
-      const dy = y - cy;
+      const yn = (cy - y) / s;
+      if (yn < -1 || yn > 1) continue;
       for (let x = 0; x < width; x += step) {
-        const dx = x - cx;
-        if (dx * dx + dy * dy > R2) continue;
-        const ll = invert([x, y]);
-        if (!ll) continue;
-        let u = (((ll[0] + 180) / 360) * texW) | 0; if (u < 0) u = 0; else if (u >= texW) u = texW - 1;
-        let v = (((90 - ll[1]) / 180) * texH) | 0; if (v < 0) v = 0; else if (v >= texH) v = texH - 1;
-        const si = (v * texW + u) << 2;
-        const r = texData[si], g = texData[si + 1], b = texData[si + 2];
+        const xn = (x - cx) / s;
+        const rho2 = xn * xn + yn * yn;
+        if (rho2 > 1) continue;
+        const cz = Math.sqrt(1 - rho2);
+        const ll = unrot([Math.atan2(xn, cz) * RAD, Math.asin(yn) * RAD]);
+        const fu = ((ll[0] + 180) / 360) * tw, fv = ((90 - ll[1]) / 180) * th;
+        let r, g, b;
+        if (bilinear) {
+          let u0 = Math.floor(fu), v0 = Math.floor(fv);
+          const fx = fu - u0, fy = fv - v0;
+          let u1 = u0 + 1, v1 = v0 + 1;
+          u0 = ((u0 % tw) + tw) % tw; u1 = ((u1 % tw) + tw) % tw;
+          if (v0 < 0) v0 = 0; else if (v0 >= th) v0 = th - 1;
+          if (v1 < 0) v1 = 0; else if (v1 >= th) v1 = th - 1;
+          const i00 = (v0 * tw + u0) << 2, i10 = (v0 * tw + u1) << 2, i01 = (v1 * tw + u0) << 2, i11 = (v1 * tw + u1) << 2;
+          const w00 = (1 - fx) * (1 - fy), w10 = fx * (1 - fy), w01 = (1 - fx) * fy, w11 = fx * fy;
+          r = td[i00] * w00 + td[i10] * w10 + td[i01] * w01 + td[i11] * w11;
+          g = td[i00 + 1] * w00 + td[i10 + 1] * w10 + td[i01 + 1] * w01 + td[i11 + 1] * w11;
+          b = td[i00 + 2] * w00 + td[i10 + 2] * w10 + td[i01 + 2] * w01 + td[i11 + 2] * w11;
+        } else {
+          let u = fu | 0, v = fv | 0;
+          if (u < 0) u = 0; else if (u >= tw) u = tw - 1;
+          if (v < 0) v = 0; else if (v >= th) v = th - 1;
+          const si = (v * tw + u) << 2;
+          r = td[si]; g = td[si + 1]; b = td[si + 2];
+        }
         for (let yy = 0; yy < step; yy++) {
           const Y = y + yy; if (Y >= height) break;
           for (let xx = 0; xx < step; xx++) {
@@ -892,14 +917,14 @@
         }
       }
     }
-    texCtx.putImageData(img, 0, 0);
+    texCtx.putImageData(texBuf, 0, 0);
   }
   function drawTexturedGlobe() {
     if (!texData) { // texture not loaded yet → plain ocean disc
       ctx.beginPath(); path(sphere); ctx.fillStyle = "#11385e"; ctx.fill(); return;
     }
     ensureTexCanvas();
-    const wantStep = dragging ? 2 : 1;
+    const wantStep = dragging ? 3 : 1; // coarse while dragging, full when settled
     const key = reprojectKey();
     if (key !== texKey || wantStep < texStep) { reproject(wantStep); texKey = key; texStep = wantStep; }
     ctx.drawImage(texCanvas, 0, 0, width, height);
@@ -948,10 +973,10 @@
     if (neonOn) {
       // Bloom: additive blurred copy + sharp copy on top.
       ctx.globalCompositeOperation = "lighter";
-      const blur = Math.max(4, Math.min(14, scale * 0.018)); // cap so deep zoom stays fast
+      const blur = Math.max(4, Math.min(12, scale * 0.015)); // cap so deep zoom stays fast
       if ("filter" in ctx) {
         ctx.filter = "blur(" + blur.toFixed(1) + "px)";
-        ctx.globalAlpha = 0.85;
+        ctx.globalAlpha = 0.55;
         ctx.drawImage(layer, 0, 0, width, height);
         ctx.filter = "none";
       }
@@ -968,8 +993,8 @@
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
     if (neonOn) {
-      ctx.shadowColor = pal().rim; ctx.shadowBlur = 18;
-      ctx.lineWidth = 1.4; ctx.strokeStyle = pal().rim;
+      ctx.shadowColor = pal().rim; ctx.shadowBlur = 11;
+      ctx.lineWidth = 1.2; ctx.strokeStyle = pal().rim;
     } else {
       ctx.shadowColor = "#aacdf0"; ctx.shadowBlur = 6;
       ctx.lineWidth = 1; ctx.strokeStyle = "rgba(150, 185, 225, 0.45)";
@@ -1259,36 +1284,44 @@
     for (const a of list) {
       const row = document.createElement("div");
       row.className = "aw-row";
-      row.innerHTML = "<b>" + (a.iata || "—") + "</b> <span>" + (KO_AIR[a.iata] || a.name) + "</span>";
+      const lbl = document.createElement("span");
+      lbl.className = "aw-name";
+      lbl.innerHTML = "<b>" + (KO_AIR[a.iata] || a.name) + "</b> (" + (a.iata || "—") + ")";
+      lbl.title = "이 공항 노선 보기";
+      lbl.addEventListener("click", () => showAirportRoutes(a));
       const go = document.createElement("button");
       go.className = "go-btn"; go.textContent = "⊕"; go.title = "이 공항으로 이동";
       go.addEventListener("click", () => flyTo(a.lon, a.lat, 6));
-      row.appendChild(go);
+      row.appendChild(lbl); row.appendChild(go);
       host.appendChild(row);
     }
     win.hidden = false;
   }
 
-  // Right-side paginated route list for a clicked country (sorted by traffic).
+  // Right-side paginated route list (country- or airport-scoped), sorted by traffic.
+  let rlHeader = "";
+  const rlLabel = (a) => (KO_AIR[a.iata] || a.name) + " (" + (a.iata || "—") + ")";
   function showRouteList(country) {
-    rlCountry = country;
-    rlRoutes = routes.filter((r) => r.oCountry === country || r.dCountry === country)
-      .sort((a, b) => b.w - a.w);
-    rlPage = 0;
-    renderRouteList();
-    const rl = document.getElementById("routelist");
-    if (rl) rl.hidden = false;
+    rlHeader = koName(country) + " 노선";
+    rlRoutes = routes.filter((r) => r.oCountry === country || r.dCountry === country).sort((a, b) => b.w - a.w);
+    rlPage = 0; renderRouteList();
+    const rl = document.getElementById("routelist"); if (rl) rl.hidden = false;
+  }
+  function showAirportRoutes(a) {
+    rlHeader = (KO_AIR[a.iata] || a.name) + " (" + a.iata + ") 노선";
+    rlRoutes = routes.filter((r) => r.oAir.iata === a.iata || r.dAir.iata === a.iata).sort((x, y) => y.w - x.w);
+    rlPage = 0; renderRouteList();
+    const rl = document.getElementById("routelist"); if (rl) rl.hidden = false;
   }
   function renderRouteList() {
     const total = rlRoutes.length;
     const pages = Math.max(1, Math.ceil(total / RL_PER));
     rlPage = Math.max(0, Math.min(pages - 1, rlPage));
-    document.getElementById("rl-title").textContent = koName(rlCountry) + " 노선 " + total + "개";
+    document.getElementById("rl-title").textContent = rlHeader + " " + total + "개";
     const slice = rlRoutes.slice(rlPage * RL_PER, rlPage * RL_PER + RL_PER);
-    document.getElementById("rl-body").innerHTML = slice.map((r) => {
-      const o = r.oAir.iata || r.oAir.name, d = r.dAir.iata || r.dAir.name;
-      return '<div class="rl-row"><span class="rl-rt">' + o + " → " + d + '</span><span class="rl-w">' + r.w.toLocaleString("ko-KR") + "</span></div>";
-    }).join("") || '<div class="rl-row">노선 없음</div>';
+    document.getElementById("rl-body").innerHTML = slice.map((r) =>
+      '<div class="rl-row"><span class="rl-rt">' + rlLabel(r.oAir) + " → " + rlLabel(r.dAir) + '</span><span class="rl-w">' + r.w.toLocaleString("ko-KR") + "</span></div>"
+    ).join("") || '<div class="rl-row">노선 없음</div>';
     document.getElementById("rl-page").textContent = (rlPage + 1) + " / " + pages;
   }
 
