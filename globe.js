@@ -4,6 +4,12 @@
   const canvas = document.getElementById("globe");
   const ctx = canvas.getContext("2d");
 
+  // WebGL layer (behind the 2D canvas) — GPU sphere reprojection for the
+  // realistic (neon-off) texture. The GPU does per-pixel inverse projection in
+  // parallel, so pan/zoom stay smooth at any scale (no CPU per-pixel cost).
+  const glcv = document.getElementById("glglobe");
+  let gl = null, glProg = null, glU = null, glTex = null, glReady = false, glTexReady = false;
+
   let width = 0, height = 0, dpr = 1, cx = 0, cy = 0;
   let baseScale = 0;          // scale that fits the viewport
   let scale = 0;              // current scale (controls zoom)
@@ -143,7 +149,8 @@
   let texCanvas = null, texCtx = null, texKey = "", texStep = 99, texBuf = null;
   const texImg = new Image();
   texImg.onload = () => {
-    const c = document.createElement("canvas");
+    if (glReady) { glUploadTexture(); return; } // GPU path — no CPU pixel buffer needed
+    const c = document.createElement("canvas"); // CPU fallback (no WebGL)
     c.width = texImg.naturalWidth; c.height = texImg.naturalHeight;
     const cc = c.getContext("2d");
     cc.drawImage(texImg, 0, 0);
@@ -151,6 +158,74 @@
     texData = cc.getImageData(0, 0, texW, texH).data;
     texKey = "";
   };
+
+  function glInit() {
+    try {
+      gl = glcv.getContext("webgl", { alpha: false, antialias: true }) || glcv.getContext("experimental-webgl");
+      if (!gl) return false;
+      const vs = "attribute vec2 aPos; void main(){ gl_Position=vec4(aPos,0.0,1.0); }";
+      const fs = [
+        "precision highp float;",
+        "uniform vec2 uCenter; uniform float uScale, uLon0, uLat0; uniform sampler2D uTex;",
+        "const float PI=3.141592653589793;",
+        "void main(){",
+        "  vec2 p=gl_FragCoord.xy;",
+        "  float xn=(p.x-uCenter.x)/uScale, yn=(p.y-uCenter.y)/uScale;",
+        "  float rho2=xn*xn+yn*yn;",
+        "  if(rho2>1.0){ gl_FragColor=vec4(mix(vec3(0.05,0.05,0.10),vec3(0.012,0.012,0.03),clamp(sqrt(rho2)*0.45,0.0,1.0)),1.0); return; }",
+        "  float cz=sqrt(1.0-rho2), cp=cos(uLat0), sp=sin(uLat0);",
+        "  float lonA=atan(xn, cz*cp + yn*sp);",
+        "  float latA=asin(clamp(yn*cp - cz*sp, -1.0, 1.0));",
+        "  gl_FragColor=texture2D(uTex, vec2(fract((lonA-uLon0)/(2.0*PI)+0.5), latA/PI+0.5));",
+        "}",
+      ].join("\n");
+      const compile = (t, src) => { const s = gl.createShader(t); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
+      glProg = gl.createProgram();
+      gl.attachShader(glProg, compile(gl.VERTEX_SHADER, vs));
+      gl.attachShader(glProg, compile(gl.FRAGMENT_SHADER, fs));
+      gl.linkProgram(glProg);
+      if (!gl.getProgramParameter(glProg, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(glProg));
+      gl.useProgram(glProg);
+      const buf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+      const ap = gl.getAttribLocation(glProg, "aPos");
+      gl.enableVertexAttribArray(ap);
+      gl.vertexAttribPointer(ap, 2, gl.FLOAT, false, 0, 0);
+      glU = {
+        center: gl.getUniformLocation(glProg, "uCenter"), scale: gl.getUniformLocation(glProg, "uScale"),
+        lon0: gl.getUniformLocation(glProg, "uLon0"), lat0: gl.getUniformLocation(glProg, "uLat0"),
+        tex: gl.getUniformLocation(glProg, "uTex"),
+      };
+      return true;
+    } catch (e) { console.error("WebGL init failed:", e); gl = null; return false; }
+  }
+  function glUploadTexture() {
+    glTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, glTex);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, texImg);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    glTexReady = true;
+  }
+  function glRender() {
+    if (!gl) return;
+    gl.viewport(0, 0, glcv.width, glcv.height);
+    gl.clearColor(0.012, 0.012, 0.03, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+    if (!glTexReady) return;
+    gl.useProgram(glProg);
+    gl.uniform2f(glU.center, cx * dpr, glcv.height - cy * dpr);
+    gl.uniform1f(glU.scale, scale * dpr);
+    gl.uniform1f(glU.lon0, rotation[0] * Math.PI / 180);
+    gl.uniform1f(glU.lat0, rotation[1] * Math.PI / 180);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, glTex); gl.uniform1i(glU.tex, 0);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
+
+  glReady = glInit();
   texImg.src = "earth-hypso.jpg?v=2";
 
   // Plane cap by how narrow the current view is.
@@ -807,6 +882,8 @@
     canvas.style.height = height + "px";
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
+    if (glcv) { glcv.width = canvas.width; glcv.height = canvas.height; }
+
     layer.width = canvas.width;
     layer.height = canvas.height;
     lctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -1092,14 +1169,22 @@
     projection.rotate(rotation);
     applyScale();
 
-    drawBackground(t);
-    drawAtmosphere();
     if (neonOn) {
+      drawBackground(t);
+      drawAtmosphere();
       drawOcean();
       drawGraticule();
       drawLand();
+    } else if (glReady) {
+      // GPU draws space + textured sphere on the WebGL canvas behind; the 2D
+      // canvas stays transparent here and only carries overlays on top.
+      glRender();
+      drawAtmosphere();
     } else {
-      drawTexturedGlobe(); // Natural Earth hypso texture (ocean + land + relief)
+      // CPU fallback (no WebGL).
+      drawBackground(t);
+      drawTexturedGlobe();
+      drawAtmosphere();
     }
     drawFlights(frameDt);
     drawRim();
@@ -1471,6 +1556,7 @@
     neonOn = !neonOn;
     elNeon.classList.toggle("off", !neonOn);
     elNeon.textContent = neonOn ? "네온효과: 켜짐" : "네온효과: 꺼짐";
+    if (glcv && glReady) glcv.style.display = neonOn ? "none" : "block";
   });
   const elAlwaysAir = document.getElementById("always-airports");
   if (elAlwaysAir) elAlwaysAir.addEventListener("change", () => {

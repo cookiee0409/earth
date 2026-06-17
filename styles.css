@@ -8,8 +8,18 @@ html, body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
+#glglobe {
+  display: none;            /* shown only in realistic (neon-off) mode */
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 0;
+}
 #globe {
   display: block;
+  position: relative;
+  z-index: 1;
   width: 100vw;
   height: 100vh;
   cursor: grab;
